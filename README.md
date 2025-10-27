@@ -4,7 +4,17 @@
 
 Hệ thống giám sát OSINT liên tục dựa trên BBOT với FastAPI, Neo4j để lưu trữ kết quả đầy đủ, và MCP server để query từ Cursor.
 
-Tài liệu BBOT tham khảo: [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
+**GitHub Repository:** [https://github.com/dn9uy3n/bbot-osint-mcp](https://github.com/dn9uy3n/bbot-osint-mcp)
+
+**Tài liệu tham khảo:**
+- [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
+- [Hướng dẫn cài đặt chi tiết](docs/INSTALLATION.md)
+- [Hướng dẫn sử dụng API](docs/API_USAGE.md)
+- [Tích hợp Cursor MCP](docs/MCP_INTEGRATION.md)
+- [Neo4j Data Model](docs/NEO4J_MODEL.md)
+- [Giải thích Sleep Parameters](SLEEP_PARAMETERS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Gỡ cài đặt](docs/UNINSTALL.md)
 
 ### Mô tả dự án
 
@@ -677,6 +687,109 @@ LIMIT 50
 sudo docker compose exec neo4j neo4j-admin database dump neo4j \
   --to-path=/data/backups/backup-$(date +%Y%m%d).dump
 ```
+
+---
+
+## Quản lý và Bảo trì
+
+### Tạm dừng để sửa config
+
+Khi cần thêm targets mới, cập nhật API keys, hoặc thay đổi sleep times:
+
+```bash
+cd ~/bbot-osint-mcp
+
+# Dừng OSINT service
+sudo docker compose stop osint
+
+# Sửa config
+nano init_config.json
+
+# Khởi động lại
+sudo docker compose start osint
+
+# Xem logs
+sudo docker logs -f bbot_osint
+```
+
+**Hoặc hot reload (không cần stop):**
+
+```bash
+# Sửa config trực tiếp
+nano init_config.json
+
+# Restart để apply
+sudo docker compose restart osint
+```
+
+### Các thao tác thường dùng
+
+```bash
+# Xem logs realtime
+sudo docker logs -f bbot_osint
+
+# Xem chỉ scanner logs
+sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
+
+# Kiểm tra status
+curl -H "X-API-Token: $(cat secrets/api_token)" \
+  https://osint.example.com/status
+
+# Restart services
+sudo docker compose restart osint
+
+# Update code
+git pull
+sudo docker compose up -d --build
+
+# Xem resource usage
+sudo docker stats bbot_osint bbot_neo4j
+```
+
+### Backup dữ liệu
+
+```bash
+# Backup Neo4j volume
+mkdir -p ~/backups
+sudo docker run --rm \
+  -v bbot-osint-mcp_neo4j_data:/data \
+  -v ~/backups:/backup \
+  ubuntu tar czf /backup/neo4j-$(date +%Y%m%d).tar.gz /data
+
+# Backup config
+cp init_config.json ~/backup-init_config.json
+cp secrets/credentials.txt ~/backup-credentials.txt
+```
+
+**Chi tiết đầy đủ:** [docs/UNINSTALL.md](docs/UNINSTALL.md) (bao gồm tạm dừng, sửa config, backup, restore)
+
+---
+
+## Gỡ cài đặt
+
+Xem hướng dẫn chi tiết: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
+
+### Gỡ nhanh (xóa tất cả)
+
+```bash
+cd ~/bbot-osint-mcp
+sudo docker compose down -v
+sudo docker rmi bbot-osint-mcp-osint:latest neo4j:5.23.1 caddy:2.8-alpine
+cd ~ && rm -rf ~/bbot-osint-mcp
+```
+
+### Hoặc dùng script tự động
+
+```bash
+cd ~/bbot-osint-mcp
+chmod +x scripts/uninstall.sh
+./scripts/uninstall.sh
+```
+
+Script cung cấp 3 tùy chọn:
+1. Gỡ hoàn toàn (xóa tất cả)
+2. Gỡ nhưng giữ dữ liệu (có thể cài lại sau)
+3. Chỉ reset database Neo4j
 
 ---
 

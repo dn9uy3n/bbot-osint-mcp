@@ -4,7 +4,17 @@
 
 Continuous OSINT monitoring system based on BBOT with FastAPI, Neo4j for full data storage, and MCP server for querying from Cursor.
 
-BBOT reference: [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
+**GitHub Repository:** [https://github.com/dn9uy3n/bbot-osint-mcp](https://github.com/dn9uy3n/bbot-osint-mcp)
+
+**Documentation:**
+- [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
+- [Detailed Installation Guide](docs/INSTALLATION.md)
+- [API Usage Guide](docs/API_USAGE.md)
+- [Cursor MCP Integration](docs/MCP_INTEGRATION.md)
+- [Neo4j Data Model](docs/NEO4J_MODEL.md)
+- [Sleep Parameters Explained](SLEEP_PARAMETERS.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Uninstall Guide](docs/UNINSTALL.md)
 
 ### Project Description
 
@@ -687,7 +697,112 @@ sudo docker compose exec neo4j neo4j-admin database dump neo4j \
 
 ---
 
+## Management and Maintenance
+
+### Pause to Edit Config
+
+When you need to add new targets, update API keys, or change sleep times:
+
+```bash
+cd ~/bbot-osint-mcp
+
+# Stop OSINT service
+sudo docker compose stop osint
+
+# Edit config
+nano init_config.json
+
+# Start again
+sudo docker compose start osint
+
+# View logs
+sudo docker logs -f bbot_osint
+```
+
+**Or hot reload (no stop needed):**
+
+```bash
+# Edit config directly
+nano init_config.json
+
+# Restart to apply
+sudo docker compose restart osint
+```
+
+### Common Operations
+
+```bash
+# View logs in realtime
+sudo docker logs -f bbot_osint
+
+# View only scanner logs
+sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
+
+# Check status
+curl -H "X-API-Token: $(cat secrets/api_token)" \
+  https://osint.example.com/status
+
+# Restart services
+sudo docker compose restart osint
+
+# Update code
+git pull
+sudo docker compose up -d --build
+
+# View resource usage
+sudo docker stats bbot_osint bbot_neo4j
+```
+
+### Backup Data
+
+```bash
+# Backup Neo4j volume
+mkdir -p ~/backups
+sudo docker run --rm \
+  -v bbot-osint-mcp_neo4j_data:/data \
+  -v ~/backups:/backup \
+  ubuntu tar czf /backup/neo4j-$(date +%Y%m%d).tar.gz /data
+
+# Backup config
+cp init_config.json ~/backup-init_config.json
+cp secrets/credentials.txt ~/backup-credentials.txt
+```
+
+**Full details:** [docs/UNINSTALL.md](docs/UNINSTALL.md) (includes pause, edit config, backup, restore)
+
+---
+
+## Uninstall
+
+See detailed guide: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
+
+### Quick uninstall (remove all)
+
+```bash
+cd ~/bbot-osint-mcp
+sudo docker compose down -v
+sudo docker rmi bbot-osint-mcp-osint:latest neo4j:5.23.1 caddy:2.8-alpine
+cd ~ && rm -rf ~/bbot-osint-mcp
+```
+
+### Or use automated script
+
+```bash
+cd ~/bbot-osint-mcp
+chmod +x scripts/uninstall.sh
+./scripts/uninstall.sh
+```
+
+Script provides 3 options:
+1. Complete removal (delete everything)
+2. Uninstall but keep data (can reinstall later)
+3. Only reset Neo4j database
+
+---
+
 ## Troubleshooting
+
+See detailed guide: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 ### 1. Let's Encrypt Certificate Not Issued
 
