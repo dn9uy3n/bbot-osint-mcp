@@ -1,0 +1,28 @@
+{
+  # Disable automatic public HTTPS since no domain is used
+  auto_https off
+  servers {
+    read_timeout 300s
+    write_timeout 300s
+    idle_timeout 300s
+  }
+}
+
+# HTTP listener to redirect to HTTPS
+:80 {
+  redir https://{host}{uri}
+}
+
+# HTTPS with Caddy internal CA. You must trust the CA on clients.
+:443 {
+  tls internal
+  encode gzip
+  reverse_proxy bbot_osint:8000 {
+    header_up X-Forwarded-Proto {scheme}
+    header_up Host {host}
+    header_up X-Real-IP {remote}
+    header_up X-Forwarded-For {remote}
+  }
+}
+
+

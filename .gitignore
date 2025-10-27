@@ -1,0 +1,32 @@
+# Secrets and local configs
+.env
+.env.*
+init_config.json
+config/bbot.yml
+secrets/
+reverse-proxy/certs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+venv/
+.venv/
+
+# Editors/OS
+.idea/
+.vscode/
+.DS_Store
+
+# Builds/artifacts
+dist/
+build/
+*.log
+logs/
+
+

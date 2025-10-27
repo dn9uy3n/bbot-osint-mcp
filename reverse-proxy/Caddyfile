@@ -1,0 +1,26 @@
+{
+  email {$LE_EMAIL}
+  # Optional: increase timeouts for long scans
+  servers {
+    read_timeout 300s
+    write_timeout 300s
+    idle_timeout 300s
+  }
+}
+
+{$LE_DOMAIN} {
+  encode gzip
+  tls {$LE_EMAIL}
+
+  @api path_regexp api ^/
+  reverse_proxy bbot_osint:8000 {
+    header_up X-Forwarded-Proto {scheme}
+    header_up Host {host}
+    header_up X-Real-IP {remote}
+    header_up X-Forwarded-For {remote}
+  }
+}
+
+# Optional HTTP to HTTPS redirect is automatic by Caddy
+
+

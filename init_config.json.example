@@ -1,0 +1,15 @@
+{
+  "targets": [
+    "evilcorp.com"
+  ],
+  "bbot_modules": {
+    "securitytrails": { "api_key": "CHANGE_ME" },
+    "shodan_dns": { "api_key": "CHANGE_ME" },
+    "virustotal": { "api_key": "CHANGE_ME" },
+    "c99": { "api_key": ["CHANGE_ME"] }
+  },
+  "TELEGRAM_BOT_TOKEN": "",
+  "TELEGRAM_CHAT_ID": ""
+}
+
+

@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    container_name: bbot_caddy
+    restart: unless-stopped
+    depends_on:
+      - osint
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file:
+      - .env
+    volumes:
+      - ./reverse-proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - public
+      - internal
+
+  neo4j:
+    image: neo4j:5.22
+    container_name: bbot_neo4j
+    restart: unless-stopped
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=1G
+      - NEO4J_dbms_allow__upgrade=true
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    networks:
+      - internal
+    secrets:
+      - neo4j_password
+    command: ["/bin/sh", "-lc", "export NEO4J_AUTH=${NEO4J_USERNAME}/$(cat /run/secrets/neo4j_password); exec /docker-entrypoint.sh neo4j"]
+
+  osint:
+    build:
+      context: ./services/osint
+      dockerfile: Dockerfile
+    container_name: bbot_osint
+    depends_on:
+      - neo4j
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Mount host bbot config (API keys) into the expected location for BBOT
+      - ${BBOT_CONFIG_HOST_PATH:-./config/bbot.yml}:/root/.config/bbot/bbot.yml:ro
+    command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    networks:
+      - internal
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    secrets:
+      - api_token
+      - neo4j_password
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  caddy_data:
+  caddy_config:
+
+networks:
+  public:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+secrets:
+  api_token:
+    file: ./secrets/api_token
+  neo4j_password:
+    file: ./secrets/neo4j_password
+
+

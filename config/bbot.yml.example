@@ -1,0 +1,30 @@
+# Place your BBOT API keys and config here. This file is mounted into the container at:
+#   /root/.config/bbot/bbot.yml
+# For details see BBOT docs: https://github.com/blacklanternsecurity/bbot
+
+modules:
+  shodan_dns:
+    api_key: YOUR_SHODAN_KEY
+  securitytrails:
+    api_key: YOUR_SECURITYTRAILS_KEY
+  virustotal:
+    api_key: YOUR_VIRUSTOTAL_KEY
+  c99:
+    api_key:
+      - YOUR_C99_KEY_1
+      - YOUR_C99_KEY_2
+
+# Conservative crawl/scanning defaults to avoid bans. Adjust as needed.
+config:
+  modules:
+    httpx:
+      rate_limit_per_host: 1         # requests/second per host
+      concurrent_connections: 2
+    web:
+      spider_distance: 1
+      spider_depth: 2
+      spider_links_per_page: 10
+  engine:
+    max_workers: 2                   # global concurrency
+
+
