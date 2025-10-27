@@ -1,23 +1,28 @@
-## BBOT OSINT MCP Stack (Docker)
+## BBOT OSINT Continuous Monitoring Stack (Docker)
 
 > **English version:** [README_EN.md](README_EN.md)
 
-Triển khai dịch vụ OSINT dựa trên BBOT với API FastAPI, Neo4j để lưu trữ kết quả (kèm timestamp và trạng thái), và MCP server để kết nối từ Cursor.
+Hệ thống giám sát OSINT liên tục dựa trên BBOT với FastAPI, Neo4j để lưu trữ kết quả đầy đủ, và MCP server để query từ Cursor.
 
 Tài liệu BBOT tham khảo: [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
 
 ### Mô tả dự án
 
-Hệ thống hóa BBOT thành một dịch vụ OSINT chạy trên VPS: an toàn, có API, Neo4j để lưu dữ liệu đầy đủ (events, host, domain, ip, url, email), MCP server để thao tác từ Cursor. Tối ưu để chạy liên tục với ít luồng, giảm nguy cơ bị chặn.
+Hệ thống **continuous monitoring** tự động quét targets theo chu kỳ, lưu dữ liệu đầy đủ vào Neo4j (DNS records, open ports, technologies, events), với API và MCP để query. Tối ưu để chạy 24/7 với ít luồng, giảm nguy cơ bị chặn.
 
-### Tính năng
+### Tính năng chính
 
-- Chạy BBOT với cấu hình "ít luồng" để tránh bị block, cho phép tích hợp API key qua file config.
-- Lưu kết quả vào Neo4j, có trường thời gian `last_seen_ts` và `status` cho mỗi `Host`.
-- API FastAPI để khởi chạy scan, query kết quả, và upsert dữ liệu từ client.
-- MCP server để Cursor có thể kết nối và thực thi công cụ `osint.query`, `osint.scan`, `osint.events.query` an toàn.
-- Cleanup sau scan (events quá hạn, host offline quá hạn, orphan nodes) và thông báo Telegram khi xong.
-- Hỗ trợ cấu hình đầu vào qua `init_config.json` (targets, API keys module BBOT, Telegram bot).
+- **Automatic Continuous Scanning**: Tự động quét tất cả targets theo chu kỳ được cấu hình, không cần trigger thủ công.
+- **2 loại Sleep Time**:
+  - `target_sleep_seconds`: Nghỉ giữa mỗi target trong cùng chu kỳ (tránh quét liên tục).
+  - `cycle_sleep_seconds`: Nghỉ sau khi quét xong tất cả targets trước khi bắt đầu chu kỳ mới.
+- **Full Data Fidelity**: Lưu đầy đủ dữ liệu BBOT vào Neo4j (DNS_NAME, OPEN_TCP_PORT, TECHNOLOGY, Event raw data).
+- **Incremental Updates**: Các lần quét sau chỉ cập nhật/thêm mới, không xóa dữ liệu cũ (trừ cleanup theo retention policy).
+- **MCP Query Interface**: Cursor có thể kết nối qua MCP để query dữ liệu (`osint.query`, `osint.events.query`, `osint.status`).
+- **REST API**: Query hosts và events qua HTTP API.
+- **Automatic Cleanup**: Xóa events quá hạn, hosts offline lâu, và orphan nodes sau mỗi chu kỳ.
+- **Telegram Notifications**: Thông báo sau mỗi chu kỳ quét hoàn thành.
+- **Centralized Configuration**: Tất cả cấu hình trong `init_config.json` (targets, API keys, sleep times).
 
 ### Kiến trúc
 
@@ -31,8 +36,8 @@ Hệ thống hóa BBOT thành một dịch vụ OSINT chạy trên VPS: an toàn
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        A[Cursor IDE]
-        B[Web Browser]
+        A[Cursor IDE<br/>MCP Query Only]
+        B[Monitoring Dashboard]
         C[API Client/Script]
     end
     
@@ -40,10 +45,11 @@ graph TB
         D[Caddy Reverse Proxy<br/>Port 80/443<br/>Let's Encrypt TLS]
         
         subgraph "Internal Network"
-            E[FastAPI Service<br/>Port 8000]
+            E[FastAPI Service<br/>Port 8000<br/>+ Continuous Scanner]
             F[Neo4j Database<br/>Port 7687]
             
-            E --> F
+            E -->|Ingest Data| F
+            E -->|Auto Scan Loop| E
         end
         
         D --> E
@@ -54,15 +60,46 @@ graph TB
         H[Telegram Bot API]
     end
     
-    A -->|MCP over HTTPS| D
-    B -->|HTTPS| D
+    A -->|MCP Query HTTPS| D
+    B -->|HTTPS API| D
     C -->|HTTPS API| D
-    E -->|Scan| G
-    E -->|Notify| H
+    E -->|Continuous Scan| G
+    E -->|Cycle Complete Notify| H
     
     style D fill:#f9f,stroke:#333,stroke-width:2px
     style E fill:#bbf,stroke:#333,stroke-width:2px
     style F fill:#bfb,stroke:#333,stroke-width:2px
+```
+
+#### Continuous Monitoring Flow
+
+```mermaid
+sequenceDiagram
+    participant S as Continuous Scanner
+    participant B as BBOT
+    participant N as Neo4j
+    participant T as Telegram
+    
+    Note over S: Service starts
+    S->>S: Load targets from init_config.json
+    
+    loop Every Cycle
+        Note over S: Cycle Start
+        
+        loop For each target
+            S->>B: Scan target[i]
+            B-->>S: Events stream
+            S->>N: Ingest events (incremental)
+            
+            alt Not last target
+                Note over S: Sleep target_sleep_seconds
+            end
+        end
+        
+        S->>N: Cleanup old/offline data
+        S->>T: Send cycle summary
+        Note over S: Sleep cycle_sleep_seconds
+    end
 ```
 
 #### Luồng dữ liệu Neo4j
@@ -260,30 +297,48 @@ nano init_config.json
    - Tạo bot: [@BotFather](https://t.me/botfather)
    - Lấy chat_id: [@userinfobot](https://t.me/userinfobot)
 
-**Cấu hình nâng cao scan_defaults:**
-
-Bạn có thể đặt giá trị mặc định cho các tham số scan:
+**Cấu hình scan_defaults (Quan trọng!):**
 
 ```json
 {
-  "targets": ["evilcorp.com"],
+  "targets": ["evilcorp.com", "target2.com"],
   "bbot_modules": {
     "securitytrails": { "api_key": "YOUR_KEY" }
   },
-  "TELEGRAM_BOT_TOKEN": "",
-  "TELEGRAM_CHAT_ID": "",
+  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF...",
+  "TELEGRAM_CHAT_ID": "-1001234567890",
   
   "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": [],
     "max_workers": 2,
     "spider_depth": 2,
     "spider_distance": 1,
     "spider_links_per_page": 10,
-    "sleep_after_scan_seconds": 120
+    "allow_deadly": false,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
   }
 }
 ```
 
-**scan_defaults** sẽ tự động áp dụng khi gọi API `/scan` mà không truyền các giá trị này. Nếu truyền rõ trong request, giá trị trong request sẽ được ưu tiên.
+**Giải thích các tham số quan trọng:**
+
+1. **targets**: Danh sách tất cả targets sẽ được quét tự động. Scanner sẽ lặp qua từng target theo thứ tự.
+
+2. **target_sleep_seconds** (mặc định 300 = 5 phút):
+   - Thời gian **nghỉ giữa mỗi target** trong cùng một chu kỳ.
+   - Ví dụ: Scan target1 → sleep 5 phút → Scan target2 → sleep 5 phút → Scan target3
+   - **Mục đích**: Tránh quét liên tục nhiều targets gây chú ý, giảm nguy cơ block.
+   - **Khuyến nghị**: 300-600s (5-10 phút) cho production.
+
+3. **cycle_sleep_seconds** (mặc định 3600 = 1 giờ):
+   - Thời gian **nghỉ sau khi quét xong TẤT CẢ targets** trước khi bắt đầu chu kỳ mới.
+   - Ví dụ: [Quét all targets + cleanup] → sleep 1 giờ → [Quét all targets lại...]
+   - **Mục đích**: Cho API keys và hệ thống "rest", tránh rate limit.
+   - **Khuyến nghị**: 3600-7200s (1-2 giờ) cho monitoring thường xuyên, 86400s (24 giờ) cho daily audit.
+
+📖 **Chi tiết đầy đủ về 2 tham số sleep**: Xem file [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
 
 ### Bước 6: Kiểm tra DNS và Firewall
 
@@ -325,28 +380,38 @@ API_TOKEN=$(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')
 
 # Test healthcheck
 curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
-# Kết quả: {"status":"ok"}
+# Kết quả: {"status":"ok","scanner_running":true,"targets":["evilcorp.com"]}
+
+# Kiểm tra trạng thái scanner
+curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/status"
 ```
 
-### Bước 9: Chạy scan đầu tiên
+### Bước 9: Theo dõi quá trình scan
+
+Continuous scanner tự động bắt đầu khi service khởi động. Theo dõi logs:
 
 ```bash
-curl -X POST "https://osint.example.com/scan" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{
-    "targets": ["example.com"],
-    "presets": ["subdomain-enum"],
-    "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "sleep_after_scan_seconds": 60
-  }'
+# Xem logs của OSINT service
+sudo docker logs -f bbot_osint
+
+# Filter chỉ xem scanner logs
+sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
 ```
 
-**Telegram notification**: Nếu đã cấu hình, bạn sẽ nhận tin nhắn khi scan hoàn tất.
+**Output mẫu:**
+```
+[INFO] === Starting scan cycle at 2025-10-27 14:30:00 ===
+[INFO] [1/2] Scanning target: evilcorp.com
+[INFO] ✓ Target evilcorp.com completed: 1247 events
+[INFO] Sleeping 300s before next target...
+[INFO] [2/2] Scanning target: target2.com
+[INFO] ✓ Target target2.com completed: 892 events
+[INFO] Running cleanup...
+[INFO] === Cycle completed in 1534s, total events: 2139 ===
+[INFO] Sleeping 3600s until next cycle...
+```
+
+**Telegram notification**: Sau mỗi chu kỳ, bạn sẽ nhận tin nhắn tóm tắt.
 
 ---
 
@@ -408,39 +473,32 @@ Scan lần 2 (ngày 35):
 
 ### Các endpoint chính
 
-**1. Healthcheck**
+**1. Healthcheck & Status**
 
 ```bash
+# Kiểm tra service health
 curl -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
+
+# Xem trạng thái scanner chi tiết
+curl -H "X-API-Token: $API_TOKEN" "https://osint.example.com/status"
 ```
 
-**2. Scan (với tất cả tham số)**
-
-```bash
-curl -X POST "https://osint.example.com/scan" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{
-    "targets": ["evilcorp.com"],
+**Response mẫu `/status`:**
+```json
+{
+  "scanner_running": true,
+  "targets": ["evilcorp.com", "target2.com"],
+  "scan_config": {
     "presets": ["subdomain-enum"],
-    "flags": [],
     "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "sleep_after_scan_seconds": 120
-  }'
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
+  },
+  "cleanup_enabled": true
+}
 ```
 
-**Giải thích tham số:**
-- `targets`: Danh sách domain cần scan
-- `presets`: Preset BBOT (`subdomain-enum`, `spider`, `web-basic`, v.v.)
-- `max_workers`: Số luồng đồng thời (khuyến nghị 2-3)
-- `spider_depth`, `spider_distance`, `spider_links_per_page`: Giới hạn web crawling
-- `sleep_after_scan_seconds`: Nghỉ sau scan (tránh bị block khi scan liên tục)
-
-**3. Query hosts**
+**2. Query hosts**
 
 ```bash
 curl -X POST "https://osint.example.com/query" \
@@ -453,14 +511,14 @@ curl -X POST "https://osint.example.com/query" \
   }'
 ```
 
-**4. Query events (full fidelity)**
+**3. Query events (full fidelity)**
 
 ```bash
 curl -X POST "https://osint.example.com/events/query" \
   -H "Content-Type: application/json" \
   -H "X-API-Token: $API_TOKEN" \
   -d '{
-    "types": ["DNS_NAME", "URL"],
+    "types": ["DNS_NAME", "OPEN_TCP_PORT", "TECHNOLOGY"],
     "modules": ["subfinder", "httpx"],
     "domain": "evilcorp.com",
     "since_ts": 1729000000,
@@ -468,21 +526,7 @@ curl -X POST "https://osint.example.com/events/query" \
   }'
 ```
 
-**5. Upsert thủ công**
-
-```bash
-curl -X POST "https://osint.example.com/upsert" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{
-    "domain": "evilcorp.com",
-    "host": "www.evilcorp.com",
-    "status": "online",
-    "last_seen_ts": 1730000000,
-    "sources": ["manual"],
-    "ports": [80, 443]
-  }'
-```
+**Lưu ý**: Không có endpoint `/scan` để trigger scan thủ công. Scanner tự động chạy theo chu kỳ với targets trong `init_config.json`.
 
 ---
 
@@ -517,11 +561,11 @@ Trong Cursor:
 
 ### Bước 3: Sử dụng tools
 
-Bạn sẽ thấy 3 tools:
+Bạn sẽ thấy 3 tools (chỉ để query, không trigger scan):
 
 1. **osint.query**: Query hosts từ Neo4j
-2. **osint.scan**: Khởi chạy scan BBOT
-3. **osint.events.query**: Query events chi tiết
+2. **osint.events.query**: Query events chi tiết
+3. **osint.status**: Xem trạng thái scanner
 
 **Ví dụ trong Cursor chat:**
 
@@ -529,11 +573,15 @@ Bạn sẽ thấy 3 tools:
 Call MCP tool: osint.query {"domain":"evilcorp.com","online_only":true}
 ```
 
-hoặc
+```
+Call MCP tool: osint.events.query {"types":["DNS_NAME","OPEN_TCP_PORT"],"limit":100}
+```
 
 ```
-Call MCP tool: osint.scan {"targets":["evilcorp.com"],"presets":["subdomain-enum"]}
+Call MCP tool: osint.status {}
 ```
+
+**Lưu ý**: MCP **KHÔNG có** tool `osint.scan`. Scan tự động chạy theo chu kỳ từ service backend.
 
 ---
 

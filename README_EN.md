@@ -1,23 +1,28 @@
-## BBOT OSINT MCP Stack (Docker)
+## BBOT OSINT Continuous Monitoring Stack (Docker)
 
 > **Vietnamese version:** [README.md](README.md)
 
-Deploy a secure OSINT service based on BBOT with FastAPI API, Neo4j for full-fidelity storage (events, hosts, domains, IPs, URLs, emails), and MCP server for Cursor integration. Optimized for continuous low-concurrency scanning to reduce blocking risk.
+Continuous OSINT monitoring system based on BBOT with FastAPI, Neo4j for full data storage, and MCP server for querying from Cursor.
 
 BBOT reference: [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
 
 ### Project Description
 
-Systematize BBOT into a production-ready OSINT service running on VPS: secure, with API, Neo4j for comprehensive data storage (events, host, domain, ip, url, email), and MCP server for Cursor interaction. Optimized for continuous operation with low concurrency to minimize blocking.
+A **continuous monitoring** system that automatically scans targets in cycles, stores full data in Neo4j (DNS records, open ports, technologies, events), with API and MCP for querying. Optimized for 24/7 operation with low concurrency, reducing risk of being blocked.
 
-### Features
+### Key Features
 
-- Run BBOT with "low-concurrency" config to avoid blocking, integrate API keys via config file.
-- Store results in Neo4j with `last_seen_ts` and `status` for each `Host`.
-- FastAPI API to trigger scans, query results, and upsert data from clients.
-- MCP server for Cursor to connect and execute `osint.query`, `osint.scan`, `osint.events.query` securely.
-- Automatic cleanup after scans (expired events, offline hosts, orphan nodes) and Telegram notifications on completion.
-- Input configuration via `init_config.json` (targets, BBOT API keys, Telegram bot).
+- **Automatic Continuous Scanning**: Automatically scans all configured targets in cycles, no manual triggering needed.
+- **2 Types of Sleep Time**:
+  - `target_sleep_seconds`: Rest between each target within same cycle (avoid continuous scanning).
+  - `cycle_sleep_seconds`: Rest after scanning all targets before starting new cycle.
+- **Full Data Fidelity**: Store complete BBOT data in Neo4j (DNS_NAME, OPEN_TCP_PORT, TECHNOLOGY, Event raw data).
+- **Incremental Updates**: Subsequent scans only update/add new data, never delete old data (except cleanup by retention policy).
+- **MCP Query Interface**: Cursor can connect via MCP to query data (`osint.query`, `osint.events.query`, `osint.status`).
+- **REST API**: Query hosts and events via HTTP API.
+- **Automatic Cleanup**: Delete expired events, long-offline hosts, and orphan nodes after each cycle.
+- **Telegram Notifications**: Notification after each completed scan cycle.
+- **Centralized Configuration**: All configuration in `init_config.json` (targets, API keys, sleep times).
 
 ### Architecture
 
@@ -31,8 +36,8 @@ Systematize BBOT into a production-ready OSINT service running on VPS: secure, w
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        A[Cursor IDE]
-        B[Web Browser]
+        A[Cursor IDE<br/>MCP Query Only]
+        B[Monitoring Dashboard]
         C[API Client/Script]
     end
     
@@ -40,10 +45,11 @@ graph TB
         D[Caddy Reverse Proxy<br/>Port 80/443<br/>Let's Encrypt TLS]
         
         subgraph "Internal Network"
-            E[FastAPI Service<br/>Port 8000]
+            E[FastAPI Service<br/>Port 8000<br/>+ Continuous Scanner]
             F[Neo4j Database<br/>Port 7687]
             
-            E --> F
+            E -->|Ingest Data| F
+            E -->|Auto Scan Loop| E
         end
         
         D --> E
@@ -54,15 +60,46 @@ graph TB
         H[Telegram Bot API]
     end
     
-    A -->|MCP over HTTPS| D
-    B -->|HTTPS| D
+    A -->|MCP Query HTTPS| D
+    B -->|HTTPS API| D
     C -->|HTTPS API| D
-    E -->|Scan| G
-    E -->|Notify| H
+    E -->|Continuous Scan| G
+    E -->|Cycle Complete Notify| H
     
     style D fill:#f9f,stroke:#333,stroke-width:2px
     style E fill:#bbf,stroke:#333,stroke-width:2px
     style F fill:#bfb,stroke:#333,stroke-width:2px
+```
+
+#### Continuous Monitoring Flow
+
+```mermaid
+sequenceDiagram
+    participant S as Continuous Scanner
+    participant B as BBOT
+    participant N as Neo4j
+    participant T as Telegram
+    
+    Note over S: Service starts
+    S->>S: Load targets from init_config.json
+    
+    loop Every Cycle
+        Note over S: Cycle Start
+        
+        loop For each target
+            S->>B: Scan target[i]
+            B-->>S: Events stream
+            S->>N: Ingest events (incremental)
+            
+            alt Not last target
+                Note over S: Sleep target_sleep_seconds
+            end
+        end
+        
+        S->>N: Cleanup old/offline data
+        S->>T: Send cycle summary
+        Note over S: Sleep cycle_sleep_seconds
+    end
 ```
 
 #### Neo4j Data Flow
@@ -260,30 +297,48 @@ nano init_config.json
    - Create bot: [@BotFather](https://t.me/botfather)
    - Get chat_id: [@userinfobot](https://t.me/userinfobot)
 
-**Advanced Configuration - scan_defaults:**
-
-You can set default values for scan parameters:
+**scan_defaults Configuration (Important!):**
 
 ```json
 {
-  "targets": ["evilcorp.com"],
+  "targets": ["evilcorp.com", "target2.com"],
   "bbot_modules": {
     "securitytrails": { "api_key": "YOUR_KEY" }
   },
-  "TELEGRAM_BOT_TOKEN": "",
-  "TELEGRAM_CHAT_ID": "",
+  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF...",
+  "TELEGRAM_CHAT_ID": "-1001234567890",
   
   "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": [],
     "max_workers": 2,
     "spider_depth": 2,
     "spider_distance": 1,
     "spider_links_per_page": 10,
-    "sleep_after_scan_seconds": 120
+    "allow_deadly": false,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
   }
 }
 ```
 
-**scan_defaults** will be automatically applied when calling `/scan` API without passing these values. If you explicitly pass values in the request, those values will take priority.
+**Key Parameters Explained:**
+
+1. **targets**: List of all targets to be scanned automatically. Scanner will loop through each target in order.
+
+2. **target_sleep_seconds** (default 300 = 5 minutes):
+   - Time to **rest between each target** within same cycle.
+   - Example: Scan target1 → sleep 5 min → Scan target2 → sleep 5 min → Scan target3
+   - **Purpose**: Avoid continuous scanning of multiple targets that attracts attention, reduce blocking risk.
+   - **Recommended**: 300-600s (5-10 minutes) for production.
+
+3. **cycle_sleep_seconds** (default 3600 = 1 hour):
+   - Time to **rest after scanning ALL targets** before starting new cycle.
+   - Example: [Scan all targets + cleanup] → sleep 1 hour → [Scan all targets again...]
+   - **Purpose**: Give API keys and system a "rest", avoid rate limits.
+   - **Recommended**: 3600-7200s (1-2 hours) for frequent monitoring, 86400s (24 hours) for daily audit.
+
+📖 **Full details on 2 sleep parameters**: See [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
 
 ### Step 6: Verify DNS and Firewall
 

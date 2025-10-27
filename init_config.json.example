@@ -1,6 +1,7 @@
 {
   "targets": [
-    "evilcorp.com"
+    "evilcorp.com",
+    "target2.com"
   ],
   "bbot_modules": {
     "securitytrails": { "api_key": "CHANGE_ME" },
@@ -11,11 +12,15 @@
   "TELEGRAM_BOT_TOKEN": "",
   "TELEGRAM_CHAT_ID": "",
   "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": [],
     "max_workers": 2,
     "spider_depth": 2,
     "spider_distance": 1,
     "spider_links_per_page": 10,
-    "sleep_after_scan_seconds": 120
+    "allow_deadly": false,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
   }
 }
 
