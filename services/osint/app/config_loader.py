@@ -26,6 +26,12 @@ def apply_init_config():
     targets = cfg.get("targets")
     if isinstance(targets, list):
         settings.default_targets = [str(t) for t in targets]
+    
+    # Scan defaults - store in settings for use in scan endpoint
+    scan_defaults = cfg.get("scan_defaults")
+    if isinstance(scan_defaults, dict):
+        settings.scan_defaults = scan_defaults
+    
     # BBOT API keys: write into mounted bbot.yml if provided via init config
     bbot_modules = cfg.get("bbot_modules")
     if isinstance(bbot_modules, dict):

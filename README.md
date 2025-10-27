@@ -26,6 +26,91 @@ Hệ thống hóa BBOT thành một dịch vụ OSINT chạy trên VPS: an toàn
 - `services/osint`: mã nguồn API, BBOT runner, MCP server.
 - `reverse-proxy/Caddyfile`: cấu hình Caddy với Let's Encrypt tự động.
 
+#### Sơ đồ kiến trúc
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        A[Cursor IDE]
+        B[Web Browser]
+        C[API Client/Script]
+    end
+    
+    subgraph "VPS Server"
+        D[Caddy Reverse Proxy<br/>Port 80/443<br/>Let's Encrypt TLS]
+        
+        subgraph "Internal Network"
+            E[FastAPI Service<br/>Port 8000]
+            F[Neo4j Database<br/>Port 7687]
+            
+            E --> F
+        end
+        
+        D --> E
+    end
+    
+    subgraph "External Services"
+        G[BBOT Modules<br/>SecurityTrails, Shodan,<br/>VirusTotal, etc.]
+        H[Telegram Bot API]
+    end
+    
+    A -->|MCP over HTTPS| D
+    B -->|HTTPS| D
+    C -->|HTTPS API| D
+    E -->|Scan| G
+    E -->|Notify| H
+    
+    style D fill:#f9f,stroke:#333,stroke-width:2px
+    style E fill:#bbf,stroke:#333,stroke-width:2px
+    style F fill:#bfb,stroke:#333,stroke-width:2px
+```
+
+#### Luồng dữ liệu Neo4j
+
+```mermaid
+graph LR
+    subgraph "BBOT Events"
+        E1[DNS_NAME]
+        E2[OPEN_TCP_PORT]
+        E3[TECHNOLOGY]
+        E4[URL]
+        E5[EMAIL]
+    end
+    
+    subgraph "Neo4j Nodes"
+        N1[Host]
+        N2[Domain]
+        N3[DNS_NAME]
+        N4[OPEN_TCP_PORT]
+        N5[TECHNOLOGY]
+        N6[IP]
+        N7[URL]
+        N8[Email]
+        N9[Module]
+        N10[Event]
+    end
+    
+    E1 --> N3
+    E2 --> N4
+    E3 --> N5
+    E4 --> N7
+    E5 --> N8
+    
+    N1 -->|PART_OF| N2
+    N3 -->|RESOLVES_TO| N1
+    N4 -->|ON_HOST| N1
+    N1 -->|USES_TECH| N5
+    N10 -->|ABOUT| N1
+    N10 -->|ABOUT| N2
+    N10 -->|EMITTED_BY| N9
+    
+    style N1 fill:#bbf,stroke:#333,stroke-width:2px
+    style N2 fill:#bfb,stroke:#333,stroke-width:2px
+    style N3 fill:#fbb,stroke:#333,stroke-width:2px
+    style N4 fill:#fbf,stroke:#333,stroke-width:2px
+    style N5 fill:#ffb,stroke:#333,stroke-width:2px
+```
+
 ---
 
 ## Hướng dẫn cài đặt từ đầu (Step-by-Step)
@@ -175,9 +260,9 @@ nano init_config.json
    - Tạo bot: [@BotFather](https://t.me/botfather)
    - Lấy chat_id: [@userinfobot](https://t.me/userinfobot)
 
-**Cấu hình nâng cao (tùy chọn):**
+**Cấu hình nâng cao scan_defaults:**
 
-Bạn có thể thêm các tham số BBOT nâng cao vào `init_config.json`:
+Bạn có thể đặt giá trị mặc định cho các tham số scan:
 
 ```json
 {
@@ -198,7 +283,7 @@ Bạn có thể thêm các tham số BBOT nâng cao vào `init_config.json`:
 }
 ```
 
-**Lưu ý**: Hiện tại `scan_defaults` chưa được tự động áp dụng, bạn cần truyền trực tiếp khi gọi API `/scan`. Tính năng này sẽ được bổ sung trong phiên bản sau.
+**scan_defaults** sẽ tự động áp dụng khi gọi API `/scan` mà không truyền các giá trị này. Nếu truyền rõ trong request, giá trị trong request sẽ được ưu tiên.
 
 ### Bước 6: Kiểm tra DNS và Firewall
 
@@ -461,13 +546,19 @@ Call MCP tool: osint.scan {"targets":["evilcorp.com"],"presets":["subdomain-enum
 - `IP {addr}`: Địa chỉ IP
 - `URL {value}`: URLs
 - `Email {value}`: Email addresses
+- `DNS_NAME {name, last_seen_ts}`: DNS records từ BBOT
+- `OPEN_TCP_PORT {endpoint, port, host, last_seen_ts}`: Cổng mở (ví dụ: `example.com:443`)
+- `TECHNOLOGY {name}`: Công nghệ phát hiện được (ví dụ: `nginx`, `PHP`, `WordPress`)
 - `Module {name}`: BBOT modules
-- `Event {id, type, ts, raw}`: Events từ BBOT
+- `Event {id, type, ts, raw}`: Events từ BBOT (lưu đầy đủ raw data)
 
 ### Relationships
 
 - `(:Host)-[:PART_OF]->(:Domain)`: Host thuộc domain
-- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email)`: Event về entity nào
+- `(:DNS_NAME)-[:RESOLVES_TO]->(:Host)`: DNS name resolve tới host
+- `(:OPEN_TCP_PORT)-[:ON_HOST]->(:Host)`: Port mở trên host nào
+- `(:Host)-[:USES_TECH]->(:TECHNOLOGY)`: Host sử dụng công nghệ gì
+- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email|:DNS_NAME|:OPEN_TCP_PORT|:TECHNOLOGY)`: Event về entity nào
 - `(:Event)-[:EMITTED_BY]->(:Module)`: Event từ module nào
 
 ### Truy vấn Neo4j
@@ -489,6 +580,21 @@ MATCH (h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
 WHERE h.status = "online"
 RETURN h.fqdn, h.last_seen_ts, h.ports
 ORDER BY h.last_seen_ts DESC
+
+// Tìm tất cả open ports của một domain
+MATCH (op:OPEN_TCP_PORT)-[:ON_HOST]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+RETURN h.fqdn, op.port, op.last_seen_ts
+ORDER BY op.port
+
+// Tìm công nghệ được sử dụng
+MATCH (h:Host)-[:USES_TECH]->(t:TECHNOLOGY)
+WHERE h.fqdn CONTAINS "evilcorp.com"
+RETURN h.fqdn, collect(t.name) as technologies
+
+// Tìm DNS records
+MATCH (dn:DNS_NAME)-[:RESOLVES_TO]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+RETURN dn.name, h.fqdn, dn.last_seen_ts
+ORDER BY dn.last_seen_ts DESC
 
 // Tìm events liên quan đến một host
 MATCH (ev:Event)-[:ABOUT]->(h:Host {fqdn: "www.evilcorp.com"})

@@ -49,6 +49,9 @@ def ensure_constraints() -> None:
         "CREATE CONSTRAINT email_unique IF NOT EXISTS FOR (e:Email) REQUIRE e.value IS UNIQUE",
         "CREATE CONSTRAINT module_unique IF NOT EXISTS FOR (m:Module) REQUIRE m.name IS UNIQUE",
         "CREATE CONSTRAINT event_unique IF NOT EXISTS FOR (ev:Event) REQUIRE ev.id IS UNIQUE",
+        "CREATE CONSTRAINT dns_name_unique IF NOT EXISTS FOR (dn:DNS_NAME) REQUIRE dn.name IS UNIQUE",
+        "CREATE CONSTRAINT open_port_unique IF NOT EXISTS FOR (op:OPEN_TCP_PORT) REQUIRE op.endpoint IS UNIQUE",
+        "CREATE CONSTRAINT technology_unique IF NOT EXISTS FOR (t:TECHNOLOGY) REQUIRE t.name IS UNIQUE",
     ]:
         list(neo4j_client.run(stmt))
 
@@ -75,7 +78,25 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "port": data.get("port"),
         "status": data.get("status") or "online",
         "sources": [emodule],
+        "dns_name": None,
+        "open_port_endpoint": None,
+        "technology": None,
     }
+
+    # Extract DNS_NAME specific fields
+    if etype == "DNS_NAME":
+        params["dns_name"] = data.get("name") or data.get("host")
+    
+    # Extract OPEN_TCP_PORT specific fields
+    if etype == "OPEN_TCP_PORT":
+        host_val = data.get("host") or ""
+        port_val = data.get("port") or 0
+        params["open_port_endpoint"] = f"{host_val}:{port_val}"
+        params["port"] = port_val
+    
+    # Extract TECHNOLOGY specific fields
+    if etype == "TECHNOLOGY":
+        params["technology"] = data.get("technology") or data.get("name")
 
     cypher = [
         "MERGE (m:Module {name: $module})",
@@ -109,7 +130,35 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
             "MERGE (e:Email {value: $email})",
             "MERGE (ev)-[:ABOUT]->(e)",
         ]
-    if params["port"]:
+    
+    # DNS_NAME node
+    if params["dns_name"]:
+        cypher += [
+            "MERGE (dn:DNS_NAME {name: $dns_name})",
+            "SET dn.last_seen_ts = $ts",
+            "MERGE (ev)-[:ABOUT]->(dn)",
+        ]
+    
+    # OPEN_TCP_PORT node
+    if params["open_port_endpoint"]:
+        cypher += [
+            "MERGE (op:OPEN_TCP_PORT {endpoint: $open_port_endpoint})",
+            "SET op.port = $port, op.host = $host, op.last_seen_ts = $ts",
+            "MERGE (ev)-[:ABOUT]->(op)",
+        ]
+        if params["host"]:
+            cypher += ["MERGE (op)-[:ON_HOST]->(h)"]
+    
+    # TECHNOLOGY node
+    if params["technology"]:
+        cypher += [
+            "MERGE (t:TECHNOLOGY {name: $technology})",
+            "MERGE (ev)-[:ABOUT]->(t)",
+        ]
+        if params["host"]:
+            cypher += ["MERGE (h)-[:USES_TECH]->(t)"]
+    
+    if params["port"] and params["host"]:
         cypher += [
             "SET h.ports = apoc.coll.toSet(coalesce(h.ports, []) + [$port])",
         ]

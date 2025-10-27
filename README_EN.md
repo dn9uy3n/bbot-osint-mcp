@@ -26,6 +26,91 @@ Systematize BBOT into a production-ready OSINT service running on VPS: secure, w
 - `services/osint`: API, BBOT runner, MCP server source code.
 - `reverse-proxy/Caddyfile`: Caddy configuration with automatic Let's Encrypt.
 
+#### Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        A[Cursor IDE]
+        B[Web Browser]
+        C[API Client/Script]
+    end
+    
+    subgraph "VPS Server"
+        D[Caddy Reverse Proxy<br/>Port 80/443<br/>Let's Encrypt TLS]
+        
+        subgraph "Internal Network"
+            E[FastAPI Service<br/>Port 8000]
+            F[Neo4j Database<br/>Port 7687]
+            
+            E --> F
+        end
+        
+        D --> E
+    end
+    
+    subgraph "External Services"
+        G[BBOT Modules<br/>SecurityTrails, Shodan,<br/>VirusTotal, etc.]
+        H[Telegram Bot API]
+    end
+    
+    A -->|MCP over HTTPS| D
+    B -->|HTTPS| D
+    C -->|HTTPS API| D
+    E -->|Scan| G
+    E -->|Notify| H
+    
+    style D fill:#f9f,stroke:#333,stroke-width:2px
+    style E fill:#bbf,stroke:#333,stroke-width:2px
+    style F fill:#bfb,stroke:#333,stroke-width:2px
+```
+
+#### Neo4j Data Flow
+
+```mermaid
+graph LR
+    subgraph "BBOT Events"
+        E1[DNS_NAME]
+        E2[OPEN_TCP_PORT]
+        E3[TECHNOLOGY]
+        E4[URL]
+        E5[EMAIL]
+    end
+    
+    subgraph "Neo4j Nodes"
+        N1[Host]
+        N2[Domain]
+        N3[DNS_NAME]
+        N4[OPEN_TCP_PORT]
+        N5[TECHNOLOGY]
+        N6[IP]
+        N7[URL]
+        N8[Email]
+        N9[Module]
+        N10[Event]
+    end
+    
+    E1 --> N3
+    E2 --> N4
+    E3 --> N5
+    E4 --> N7
+    E5 --> N8
+    
+    N1 -->|PART_OF| N2
+    N3 -->|RESOLVES_TO| N1
+    N4 -->|ON_HOST| N1
+    N1 -->|USES_TECH| N5
+    N10 -->|ABOUT| N1
+    N10 -->|ABOUT| N2
+    N10 -->|EMITTED_BY| N9
+    
+    style N1 fill:#bbf,stroke:#333,stroke-width:2px
+    style N2 fill:#bfb,stroke:#333,stroke-width:2px
+    style N3 fill:#fbb,stroke:#333,stroke-width:2px
+    style N4 fill:#fbf,stroke:#333,stroke-width:2px
+    style N5 fill:#ffb,stroke:#333,stroke-width:2px
+```
+
 ---
 
 ## Step-by-Step Installation Guide
@@ -175,9 +260,9 @@ nano init_config.json
    - Create bot: [@BotFather](https://t.me/botfather)
    - Get chat_id: [@userinfobot](https://t.me/userinfobot)
 
-**Advanced Configuration (Optional):**
+**Advanced Configuration - scan_defaults:**
 
-You can add advanced BBOT parameters to `init_config.json`:
+You can set default values for scan parameters:
 
 ```json
 {
@@ -198,7 +283,7 @@ You can add advanced BBOT parameters to `init_config.json`:
 }
 ```
 
-**Note**: Currently `scan_defaults` is not automatically applied; you need to pass them directly when calling `/scan` API. This feature will be added in a future version.
+**scan_defaults** will be automatically applied when calling `/scan` API without passing these values. If you explicitly pass values in the request, those values will take priority.
 
 ### Step 6: Verify DNS and Firewall
 
@@ -461,13 +546,19 @@ Call MCP tool: osint.scan {"targets":["evilcorp.com"],"presets":["subdomain-enum
 - `IP {addr}`: IP addresses
 - `URL {value}`: URLs
 - `Email {value}`: Email addresses
+- `DNS_NAME {name, last_seen_ts}`: DNS records from BBOT
+- `OPEN_TCP_PORT {endpoint, port, host, last_seen_ts}`: Open ports (e.g., `example.com:443`)
+- `TECHNOLOGY {name}`: Detected technologies (e.g., `nginx`, `PHP`, `WordPress`)
 - `Module {name}`: BBOT modules
-- `Event {id, type, ts, raw}`: Events from BBOT
+- `Event {id, type, ts, raw}`: Events from BBOT (stores full raw data)
 
 ### Relationships
 
 - `(:Host)-[:PART_OF]->(:Domain)`: Host belongs to domain
-- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email)`: Event about which entity
+- `(:DNS_NAME)-[:RESOLVES_TO]->(:Host)`: DNS name resolves to host
+- `(:OPEN_TCP_PORT)-[:ON_HOST]->(:Host)`: Port open on which host
+- `(:Host)-[:USES_TECH]->(:TECHNOLOGY)`: Host uses which technology
+- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email|:DNS_NAME|:OPEN_TCP_PORT|:TECHNOLOGY)`: Event about which entity
 - `(:Event)-[:EMITTED_BY]->(:Module)`: Event from which module
 
 ### Querying Neo4j
@@ -489,6 +580,21 @@ MATCH (h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
 WHERE h.status = "online"
 RETURN h.fqdn, h.last_seen_ts, h.ports
 ORDER BY h.last_seen_ts DESC
+
+// Find all open ports of a domain
+MATCH (op:OPEN_TCP_PORT)-[:ON_HOST]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+RETURN h.fqdn, op.port, op.last_seen_ts
+ORDER BY op.port
+
+// Find technologies in use
+MATCH (h:Host)-[:USES_TECH]->(t:TECHNOLOGY)
+WHERE h.fqdn CONTAINS "evilcorp.com"
+RETURN h.fqdn, collect(t.name) as technologies
+
+// Find DNS records
+MATCH (dn:DNS_NAME)-[:RESOLVES_TO]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+RETURN dn.name, h.fqdn, dn.last_seen_ts
+ORDER BY dn.last_seen_ts DESC
 
 // Find events related to a host
 MATCH (ev:Event)-[:ABOUT]->(h:Host {fqdn: "www.evilcorp.com"})

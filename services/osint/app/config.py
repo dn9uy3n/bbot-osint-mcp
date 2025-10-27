@@ -35,6 +35,7 @@ class Settings(BaseModel):
     # Init config
     init_config_path: str = os.getenv("INIT_CONFIG_PATH", "/app/init_config.json")
     default_targets: list[str] = []
+    scan_defaults: dict = {}
 
 
 settings = Settings()

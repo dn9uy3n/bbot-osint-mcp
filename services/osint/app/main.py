@@ -48,6 +48,22 @@ async def _rate_limit(request: Request):
 @app.post("/scan", dependencies=[Depends(require_token)])
 async def scan(req: ScanRequest, request: Request):
     await _rate_limit(request)
+    
+    # Apply scan_defaults from init_config.json if values not provided
+    if settings.scan_defaults:
+        if not req.targets and settings.default_targets:
+            req.targets = settings.default_targets
+        if req.max_workers == 2 and settings.scan_defaults.get("max_workers"):
+            req.max_workers = settings.scan_defaults.get("max_workers")
+        if req.spider_depth == 2 and settings.scan_defaults.get("spider_depth"):
+            req.spider_depth = settings.scan_defaults.get("spider_depth")
+        if req.spider_distance == 1 and settings.scan_defaults.get("spider_distance"):
+            req.spider_distance = settings.scan_defaults.get("spider_distance")
+        if req.spider_links_per_page == 10 and settings.scan_defaults.get("spider_links_per_page"):
+            req.spider_links_per_page = settings.scan_defaults.get("spider_links_per_page")
+        if req.sleep_after_scan_seconds == 0 and settings.scan_defaults.get("sleep_after_scan_seconds"):
+            req.sleep_after_scan_seconds = settings.scan_defaults.get("sleep_after_scan_seconds")
+    
     if req.max_workers > settings.max_concurrent_scans:
         req.max_workers = settings.max_concurrent_scans
     await _scan_semaphore.acquire()
