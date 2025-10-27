@@ -1,5 +1,7 @@
 ## BBOT OSINT MCP Stack (Docker)
 
+> **English version:** [README_EN.md](README_EN.md)
+
 Triển khai dịch vụ OSINT dựa trên BBOT với API FastAPI, Neo4j để lưu trữ kết quả (kèm timestamp và trạng thái), và MCP server để kết nối từ Cursor.
 
 Tài liệu BBOT tham khảo: [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
@@ -20,106 +22,323 @@ Hệ thống hóa BBOT thành một dịch vụ OSINT chạy trên VPS: an toàn
 ### Kiến trúc
 
 - `docker-compose.yml`: Neo4j và service OSINT (FastAPI + MCP).
-- `config/bbot.yml`: cấu hình BBOT và API keys (mount vào container).
+- `init_config.json`: cấu hình đầu vào (targets, API keys, Telegram, tham số scan).
 - `services/osint`: mã nguồn API, BBOT runner, MCP server.
+- `reverse-proxy/Caddyfile`: cấu hình Caddy với Let's Encrypt tự động.
 
-### Chuẩn bị
+---
 
-1) Cài Docker và Docker Compose.
-2) Sao chép `.env.example` thành `.env` và cập nhật biến môi trường an toàn.
-3) Điền file `init_config.json` cho đầu vào ban đầu (targets, API keys BBOT, Telegram):
-   - Mẫu: `init_config.json.example` (sao chép sang `init_config.json`)
-   - Lưu ý: `init_config.json` đã nằm trong `.gitignore`, an toàn khi push public.
+## Hướng dẫn cài đặt từ đầu (Step-by-Step)
+
+### Yêu cầu
+
+- VPS chạy Ubuntu 22.04 hoặc 24.04
+- Domain đã trỏ A-record về IP VPS (ví dụ: `osint.example.com`)
+- Quyền root hoặc sudo
+- Mở cổng 80 và 443 trên firewall
+
+### Bước 1: Cập nhật hệ thống và cài Docker
+
+SSH vào VPS và chạy:
+
+```bash
+# Cập nhật hệ thống
+sudo apt-get update -y && sudo apt-get upgrade -y
+
+# Cài các package cần thiết
+sudo apt-get install -y ca-certificates curl gnupg lsb-release git
+
+# Thêm Docker GPG key
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+# Thêm Docker repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+   https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Cài Docker và Docker Compose
+sudo apt-get update -y
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+
+# Bật Docker tự khởi động
+sudo systemctl enable --now docker
+
+# Kiểm tra Docker
+sudo docker --version
+sudo docker compose version
+```
+
+### Bước 2: Clone repository
+
+```bash
+cd /opt
+sudo git clone https://github.com/your-username/bbot-osint-mcp.git
+cd bbot-osint-mcp
+sudo chown -R $USER:$USER .
+```
+
+### Bước 3: Sinh secrets mạnh
+
+```bash
+# Chạy script sinh secrets
+bash scripts/init-secrets.sh
+
+# Xem thông tin đã sinh (API_TOKEN, Neo4j password)
+cat secrets/credentials.txt
+```
+
+**Lưu ý**: Ghi nhớ `API_TOKEN` trong file này để dùng khi gọi API và MCP.
+
+### Bước 4: Tạo file cấu hình môi trường
+
+```bash
+# Copy file mẫu
+cp .env.example .env
+
+# Chỉnh sửa .env
+nano .env
+```
+
+Điền các giá trị:
+
+```env
+# Domain và email cho Let's Encrypt
+LE_DOMAIN=osint.example.com
+LE_EMAIL=admin@example.com
+PUBLIC_BASE_URL=https://osint.example.com
+
+# Neo4j (password sẽ dùng từ secrets/neo4j_password)
+NEO4J_USERNAME=neo4j
+
+# Giới hạn rate và concurrency
+RATE_LIMIT_PER_MINUTE=120
+MAX_CONCURRENT_SCANS=2
+
+# Cleanup policy
+CLEANUP_ENABLED=true
+EVENT_RETENTION_DAYS=30
+OFFLINE_HOST_RETENTION_DAYS=30
+ORPHAN_CLEANUP_ENABLED=true
+
+# Telegram (tùy chọn, có thể để trống và điền vào init_config.json)
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+```
+
+### Bước 5: Cấu hình init_config.json
+
+File này chứa đầu vào cho scan và API keys của các dịch vụ BBOT.
+
+```bash
+# Copy file mẫu
+cp init_config.json.example init_config.json
+
+# Chỉnh sửa
+nano init_config.json
+```
+
+**Cấu trúc chi tiết:**
+
+```json
+{
+  "targets": [
+    "evilcorp.com",
+    "target2.com"
+  ],
+  "bbot_modules": {
+    "securitytrails": { "api_key": "YOUR_SECURITYTRAILS_KEY" },
+    "shodan_dns": { "api_key": "YOUR_SHODAN_KEY" },
+    "virustotal": { "api_key": "YOUR_VIRUSTOTAL_KEY" },
+    "c99": { "api_key": ["YOUR_C99_KEY_1", "YOUR_C99_KEY_2"] }
+  },
+  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+  "TELEGRAM_CHAT_ID": "-1001234567890"
+}
+```
+
+**Giải thích chi tiết:**
+
+1. **targets**: Danh sách domain mục tiêu mặc định. Khi gọi API `/scan` mà không truyền `targets`, sẽ dùng danh sách này.
+
+2. **bbot_modules**: API keys cho các module BBOT:
+   - `securitytrails`: Tìm subdomain qua SecurityTrails
+   - `shodan_dns`: DNS enumeration qua Shodan
+   - `virustotal`: Tìm subdomain và thông tin qua VirusTotal
+   - `c99`: Nhiều nguồn OSINT (hỗ trợ nhiều key)
+   - Xem thêm modules: [BBOT Modules](https://www.blacklanternsecurity.com/bbot/scanning/configuration/)
+
+3. **TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID**: Để nhận thông báo khi scan xong.
+   - Tạo bot: [@BotFather](https://t.me/botfather)
+   - Lấy chat_id: [@userinfobot](https://t.me/userinfobot)
+
+**Cấu hình nâng cao (tùy chọn):**
+
+Bạn có thể thêm các tham số BBOT nâng cao vào `init_config.json`:
 
 ```json
 {
   "targets": ["evilcorp.com"],
   "bbot_modules": {
-    "securitytrails": { "api_key": "CHANGE_ME" },
-    "shodan_dns": { "api_key": "CHANGE_ME" },
-    "virustotal": { "api_key": "CHANGE_ME" },
-    "c99": { "api_key": ["CHANGE_ME"] }
+    "securitytrails": { "api_key": "YOUR_KEY" }
   },
   "TELEGRAM_BOT_TOKEN": "",
-  "TELEGRAM_CHAT_ID": ""
+  "TELEGRAM_CHAT_ID": "",
+  
+  "scan_defaults": {
+    "max_workers": 2,
+    "spider_depth": 2,
+    "spider_distance": 1,
+    "spider_links_per_page": 10,
+    "sleep_after_scan_seconds": 120
+  }
 }
 ```
 
-Lưu ý: nếu bạn vẫn muốn dùng `config/bbot.yml`, hệ thống sẽ merge thêm các `bbot_modules` từ `init_config.json` vào đó khi startup.
+**Lưu ý**: Hiện tại `scan_defaults` chưa được tự động áp dụng, bạn cần truyền trực tiếp khi gọi API `/scan`. Tính năng này sẽ được bổ sung trong phiên bản sau.
+
+### Bước 6: Kiểm tra DNS và Firewall
 
 ```bash
-cp .env.example .env
-cp init_config.json.example init_config.json
-cp config/bbot.yml.example config/bbot.yml
+# Kiểm tra DNS đã trỏ đúng
+dig +short osint.example.com
+# Phải trả về IP VPS của bạn
+
+# Kiểm tra firewall (Ubuntu UFW)
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 22/tcp
+sudo ufw enable
+sudo ufw status
 ```
 
-Các khóa quan trọng trong `.env`:
-
-- `API_TOKEN`: token bắt buộc ở header `X-API-Token` cho API/MCP.
-- `NEO4J_USERNAME`, `NEO4J_PASSWORD`: tài khoản Neo4j.
-- `BBOT_CONFIG_HOST_PATH`: đường dẫn file `bbot.yml` trên host.
-
-### Khởi chạy (triển khai an toàn với Let's Encrypt/Caddy)
-
-Trước khi chạy, hãy sinh secrets mạnh:
-
-Linux/macOS:
-```bash
-bash scripts/init-secrets.sh
-```
-
-Windows (PowerShell):
-```powershell
-pwsh -File scripts/init-secrets.ps1
-```
-
-Thông tin đã sinh sẽ nằm ở `secrets/credentials.txt` để bạn đọc và dùng khi kết nối.
+### Bước 7: Khởi chạy stack
 
 ```bash
-docker compose up -d --build
+# Build và start containers
+sudo docker compose up -d --build
+
+# Theo dõi logs
+sudo docker logs -f bbot_caddy
 ```
 
-- Public: chỉ mở `80/443` trên reverse proxy Caddy. API/MCP sau proxy; Neo4j nội bộ.
-- Caddy tự động xin chứng chỉ Let's Encrypt nếu domain trỏ về IP VPS.
-- Biến môi trường cần thiết trong `.env`:
+**Caddy sẽ tự động:**
+- Xin chứng chỉ từ Let's Encrypt
+- Cấu hình HTTPS tự động
+- Redirect HTTP → HTTPS
+
+Khi thấy log `certificate obtained successfully` là thành công.
+
+### Bước 8: Kiểm tra dịch vụ
+
+```bash
+# Lấy API_TOKEN
+API_TOKEN=$(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')
+
+# Test healthcheck
+curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
+# Kết quả: {"status":"ok"}
+```
+
+### Bước 9: Chạy scan đầu tiên
+
+```bash
+curl -X POST "https://osint.example.com/scan" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Token: $API_TOKEN" \
+  -d '{
+    "targets": ["example.com"],
+    "presets": ["subdomain-enum"],
+    "max_workers": 2,
+    "spider_depth": 2,
+    "spider_distance": 1,
+    "spider_links_per_page": 10,
+    "allow_deadly": false,
+    "sleep_after_scan_seconds": 60
+  }'
+```
+
+**Telegram notification**: Nếu đã cấu hình, bạn sẽ nhận tin nhắn khi scan hoàn tất.
+
+---
+
+## Giải thích chi tiết về Cleanup (Dọn dẹp)
+
+### Cleanup hoạt động như thế nào?
+
+**Cleanup KHÔNG xóa toàn bộ dữ liệu**, chỉ xóa:
+
+1. **Events quá hạn**: Events cũ hơn `EVENT_RETENTION_DAYS` (mặc định 30 ngày)
+   - Ví dụ: Event scan từ 31 ngày trước sẽ bị xóa
+   - **Dữ liệu quan trọng như Host, Domain vẫn được giữ**
+
+2. **Host offline quá hạn**: Host có `status=offline` và `last_seen_ts` cũ hơn `OFFLINE_HOST_RETENTION_DAYS`
+   - Chỉ xóa host đã offline quá lâu
+   - Host online hoặc mới offline vẫn được giữ
+
+3. **Orphan nodes** (node mồ côi): Nodes không có quan hệ nào
+   - Ví dụ: Module không liên kết với Event nào
+   - Giúp giữ database gọn gàng
+
+### Cấu hình cleanup
+
+Trong `.env`:
 
 ```env
-LE_DOMAIN=osint.example.com
-LE_EMAIL=admin@example.com
-PUBLIC_BASE_URL=https://osint.example.com
+# Bật/tắt cleanup
+CLEANUP_ENABLED=true
+
+# Giữ events trong 30 ngày
+EVENT_RETENTION_DAYS=30
+
+# Xóa host offline sau 30 ngày
+OFFLINE_HOST_RETENTION_DAYS=30
+
+# Xóa nodes mồ côi
+ORPHAN_CLEANUP_ENABLED=true
 ```
 
-- API/MCP public qua HTTPS: `https://$LE_DOMAIN/` và `https://$LE_DOMAIN/mcp`.
+**Lưu ý quan trọng:**
+- Host **online** và Domain **KHÔNG BAO GIỜ** bị xóa tự động
+- Chỉ xóa dữ liệu "rác" và dữ liệu cũ theo chính sách
+- Cleanup chạy sau mỗi lần scan
 
-Lần khởi động đầu, API sẽ tạo constraint cho `Domain` và `Host`.
+### Ví dụ
 
-### Cấu hình BBOT chống block
+Scan lần 1 (ngày 1):
+- Thu về 100 subdomains, 1000 events
+- Database: 100 hosts, 1000 events
 
-- `engine.max_workers = 2`
-- `web.spider_distance = 1`, `web.spider_depth = 2`, `web.spider_links_per_page = 10`
-- Hạn chế tốc độ của `httpx` (nếu sử dụng module web).
+Scan lần 2 (ngày 35):
+- Thu về 120 subdomains mới
+- Cleanup xóa: 1000 events cũ (>30 ngày), 10 hosts offline (>30 ngày)
+- Database sau cleanup: 110 hosts online, 1200 events mới
 
-Tham khảo cấu hình và presets/flags trong tài liệu BBOT: [BBOT README](https://github.com/blacklanternsecurity/bbot)
+---
 
-### API Usage
+## Sử dụng API
 
-Header bắt buộc: `X-API-Token: <API_TOKEN>`
+### Các endpoint chính
 
-- Healthcheck:
+**1. Healthcheck**
 
 ```bash
-curl http://localhost:8000/healthz
+curl -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
 ```
 
-- Khởi chạy scan an toàn:
+**2. Scan (với tất cả tham số)**
 
 ```bash
-curl -X POST http://localhost:8000/scan \
+curl -X POST "https://osint.example.com/scan" \
   -H "Content-Type: application/json" \
   -H "X-API-Token: $API_TOKEN" \
   -d '{
     "targets": ["evilcorp.com"],
     "presets": ["subdomain-enum"],
+    "flags": [],
     "max_workers": 2,
     "spider_depth": 2,
     "spider_distance": 1,
@@ -129,161 +348,285 @@ curl -X POST http://localhost:8000/scan \
   }'
 ```
 
-- Query kết quả:
+**Giải thích tham số:**
+- `targets`: Danh sách domain cần scan
+- `presets`: Preset BBOT (`subdomain-enum`, `spider`, `web-basic`, v.v.)
+- `max_workers`: Số luồng đồng thời (khuyến nghị 2-3)
+- `spider_depth`, `spider_distance`, `spider_links_per_page`: Giới hạn web crawling
+- `sleep_after_scan_seconds`: Nghỉ sau scan (tránh bị block khi scan liên tục)
+
+**3. Query hosts**
 
 ```bash
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{"domain":"evilcorp.com","online_only":true,"limit":50}'
-```
-
-### Cleanup và Thông báo Telegram
-
-- Cleanup tự động sau mỗi scan, có thể điều chỉnh qua biến môi trường:
-  - `CLEANUP_ENABLED=true|false`
-  - `EVENT_RETENTION_DAYS=30`
-  - `OFFLINE_HOST_RETENTION_DAYS=30`
-  - `ORPHAN_CLEANUP_ENABLED=true|false`
-- Telegram:
-  - Đặt `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID` trong `.env` để bật thông báo.
-  - Sau mỗi scan, bot sẽ báo số events thu được và số lượng phần tử bị dọn dẹp.
-
-- Query events (đầy đủ fidelity từ BBOT):
-
-```bash
-curl -X POST http://localhost:8000/events/query \
+curl -X POST "https://osint.example.com/query" \
   -H "Content-Type: application/json" \
   -H "X-API-Token: $API_TOKEN" \
   -d '{
-    "types": ["DNS_NAME","URL"],
-    "modules": ["subfinder","httpx"],
     "domain": "evilcorp.com",
-    "since_ts": 1729000000,
+    "online_only": true,
     "limit": 100
   }'
 ```
 
-- Upsert trực tiếp (client cập nhật thủ công):
+**4. Query events (full fidelity)**
 
 ```bash
-curl -X POST http://localhost:8000/upsert \
+curl -X POST "https://osint.example.com/events/query" \
   -H "Content-Type: application/json" \
   -H "X-API-Token: $API_TOKEN" \
   -d '{
-    "domain":"evilcorp.com",
-    "host":"www.evilcorp.com",
-    "status":"online",
-    "last_seen_ts": 1730000000,
-    "sources": ["manual"],
-    "ports": [80,443]
+    "types": ["DNS_NAME", "URL"],
+    "modules": ["subfinder", "httpx"],
+    "domain": "evilcorp.com",
+    "since_ts": 1729000000,
+    "limit": 200
   }'
 ```
 
-### Neo4j Data Model
+**5. Upsert thủ công**
 
-- Node `Domain {name}`
-- Node `Host {fqdn, status, last_seen_ts, sources, ports}`
-- Quan hệ `(:Host)-[:PART_OF]->(:Domain)`
-
-Constraints khởi tạo:
-
-```cypher
-CREATE CONSTRAINT domain_unique IF NOT EXISTS FOR (d:Domain) REQUIRE d.name IS UNIQUE;
-CREATE CONSTRAINT host_unique IF NOT EXISTS FOR (h:Host) REQUIRE h.fqdn IS UNIQUE;
+```bash
+curl -X POST "https://osint.example.com/upsert" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Token: $API_TOKEN" \
+  -d '{
+    "domain": "evilcorp.com",
+    "host": "www.evilcorp.com",
+    "status": "online",
+    "last_seen_ts": 1730000000,
+    "sources": ["manual"],
+    "ports": [80, 443]
+  }'
 ```
 
-### MCP Server
+---
 
-- Mount tại `/mcp` trong cùng FastAPI, yêu cầu header `X-API-Token`.
-- Tools:
-  - `osint.query(domain?, host?, online_only?, limit=50)`
-  - `osint.scan(targets, presets=["subdomain-enum"], allow_deadly=false)`
-  - `osint.events.query(types?, modules?, domain?, host?, since_ts?, until_ts?, limit=200)`
+## Tích hợp vào Cursor (MCP Client)
 
-### Tích hợp vào Cursor (MCP Client)
+### Bước 1: Cài đặt MCP trong Cursor
 
-1) Cài đặt extension MCP Client của Cursor và cấu hình server HTTP:
+1. Mở Cursor Settings
+2. Tìm phần MCP configuration
+3. Thêm cấu hình server:
 
 ```json
 {
   "mcpServers": {
     "bbot-osint": {
       "type": "http",
-      "url": "https://$LE_DOMAIN/mcp",
+      "url": "https://osint.example.com/mcp",
       "headers": {
-        "X-API-Token": "YOUR_STRONG_TOKEN"
+        "X-API-Token": "YOUR_API_TOKEN_FROM_SECRETS"
       }
     }
   }
 }
-
-### Hướng dẫn chi tiết triển khai Let's Encrypt với Caddy
-
-1) Chuẩn bị DNS: tạo bản ghi A cho `$LE_DOMAIN` trỏ tới IP VPS.
-2) Chỉnh `.env` điền `LE_DOMAIN`, `LE_EMAIL`, `PUBLIC_BASE_URL`.
-3) Kiểm tra `reverse-proxy/Caddyfile` đã dùng biến `{$LE_DOMAIN}` và `{$LE_EMAIL}`.
-4) Mở cổng 80/443 trên firewall VPS.
-5) Khởi động stack:
-
-```bash
-docker compose up -d --build
 ```
 
-6) Caddy sẽ tự động xin chứng chỉ từ Let's Encrypt và lưu trong volumes `caddy_data`.
-7) Kiểm tra truy cập `https://$LE_DOMAIN/healthz` với header `X-API-Token`.
+### Bước 2: Restart MCP client
 
-Troubleshooting:
-- Nếu không ra chứng chỉ, kiểm tra DNS đã trỏ đúng, firewall mở 80/443, logs container `proxy`.
-- Dùng `docker logs bbot_caddy` để xem chi tiết ACME.
+Trong Cursor:
+1. Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
+2. Gõ "MCP: Restart"
+3. Chọn "MCP: Restart Client"
+
+### Bước 3: Sử dụng tools
+
+Bạn sẽ thấy 3 tools:
+
+1. **osint.query**: Query hosts từ Neo4j
+2. **osint.scan**: Khởi chạy scan BBOT
+3. **osint.events.query**: Query events chi tiết
+
+**Ví dụ trong Cursor chat:**
+
 ```
-
-2) Trong Cursor, restart MCP client. Bạn sẽ thấy các tools:
-   - `osint.query`
-   - `osint.scan`
-   - `osint.events.query`
-
-3) Gọi tools trực tiếp trong Command Palette hoặc từ chat. Ví dụ:
-
-```text
 Call MCP tool: osint.query {"domain":"evilcorp.com","online_only":true}
 ```
 
-```python
-# pseudo-client: gửi request tool tới /mcp theo chuẩn MCP client của bạn
+hoặc
+
+```
+Call MCP tool: osint.scan {"targets":["evilcorp.com"],"presets":["subdomain-enum"]}
 ```
 
-### Bảo mật
+---
 
-- Luôn đặt `API_TOKEN` mạnh, truyền qua `X-API-Token`.
-- Đặt dịch vụ sau reverse proxy có TLS (nginx/caddy/traefik) hoặc bật TLS ở uvicorn.
-- Hạn chế IP truy cập hoặc VPN.
-- Không chạy presets/flags "deadly" trừ khi bạn hiểu rủi ro (BBOT có cờ `--allow-deadly`).
+## Neo4j Data Model
 
-### Reverse Proxy (ví dụ nginx)
+### Nodes
 
-```nginx
-server {
-  listen 443 ssl;
-  server_name osint.example.com;
+- `Domain {name}`: Domain chính
+- `Host {fqdn, status, last_seen_ts, sources, ports}`: Subdomain/host
+- `IP {addr}`: Địa chỉ IP
+- `URL {value}`: URLs
+- `Email {value}`: Email addresses
+- `Module {name}`: BBOT modules
+- `Event {id, type, ts, raw}`: Events từ BBOT
 
-  ssl_certificate /etc/letsencrypt/live/osint.example.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/osint.example.com/privkey.pem;
+### Relationships
 
-  location / {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-}
+- `(:Host)-[:PART_OF]->(:Domain)`: Host thuộc domain
+- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email)`: Event về entity nào
+- `(:Event)-[:EMITTED_BY]->(:Module)`: Event từ module nào
+
+### Truy vấn Neo4j
+
+Truy cập Neo4j Browser: `http://VPS_IP:7474` (chỉ từ localhost, dùng SSH tunnel)
+
+```bash
+# SSH tunnel để truy cập Neo4j
+ssh -L 7474:localhost:7474 -L 7687:localhost:7687 user@VPS_IP
 ```
 
-### Tips vận hành
+Sau đó mở trình duyệt: `http://localhost:7474`
 
-- Điều chỉnh cấu hình BBOT ở `config/bbot.yml` để cân bằng tốc độ và an toàn.
-- Theo dõi Neo4j Browser để kiểm tra dữ liệu.
-- Log API/worker để giám sát tiến trình.
+**Ví dụ queries:**
 
+```cypher
+// Tìm tất cả subdomains của evilcorp.com
+MATCH (h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+WHERE h.status = "online"
+RETURN h.fqdn, h.last_seen_ts, h.ports
+ORDER BY h.last_seen_ts DESC
 
+// Tìm events liên quan đến một host
+MATCH (ev:Event)-[:ABOUT]->(h:Host {fqdn: "www.evilcorp.com"})
+RETURN ev.type, ev.ts, ev.raw
+ORDER BY ev.ts DESC
+LIMIT 50
+```
+
+---
+
+## Bảo mật
+
+### Các biện pháp đã áp dụng
+
+1. **API Token**: Bắt buộc header `X-API-Token` cho mọi endpoint
+2. **Docker Secrets**: Credentials lưu trong Docker secrets, không hardcode
+3. **Internal Network**: Neo4j chỉ lộ trên mạng nội bộ Docker
+4. **HTTPS Only**: Caddy tự động redirect HTTP → HTTPS
+5. **Container Hardening**: Read-only filesystem, drop capabilities, no-new-privileges
+6. **Rate Limiting**: Giới hạn request per IP
+
+### Khuyến nghị bổ sung
+
+1. **Firewall**: Chỉ mở 80/443 public, SSH qua IP whitelist
+2. **VPN**: Truy cập Neo4j và quản trị qua VPN
+3. **Monitoring**: Theo dõi logs và cảnh báo 429/401
+4. **Secrets Rotation**: Xoay vòng API_TOKEN định kỳ
+5. **Backup**: Backup Neo4j data volume thường xuyên
+
+```bash
+# Backup Neo4j
+sudo docker compose exec neo4j neo4j-admin database dump neo4j \
+  --to-path=/data/backups/backup-$(date +%Y%m%d).dump
+```
+
+---
+
+## Troubleshooting
+
+### 1. Let's Encrypt không ra cert
+
+**Kiểm tra:**
+```bash
+# DNS đã trỏ đúng?
+dig +short osint.example.com
+
+# Firewall đã mở 80/443?
+sudo ufw status
+
+# Logs Caddy
+sudo docker logs bbot_caddy
+```
+
+**Giải pháp:**
+- Đảm bảo DNS trỏ về IP VPS
+- Tắt Cloudflare proxy (mây xám) trong quá trình xin cert lần đầu
+- Kiểm tra port 80/443 không bị chặn
+
+### 2. API trả về 401 Unauthorized
+
+**Nguyên nhân**: Sai hoặc thiếu `X-API-Token`
+
+**Giải pháp:**
+```bash
+# Kiểm tra token đúng
+cat secrets/credentials.txt | grep API_TOKEN
+
+# Test với token đúng
+curl -H "X-API-Token: $(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')" \
+  "https://osint.example.com/healthz"
+```
+
+### 3. Scan bị block/rate limit
+
+**Nguyên nhân**: Quét quá nhanh
+
+**Giải pháp:**
+- Giảm `max_workers` xuống 1-2
+- Tăng `sleep_after_scan_seconds`
+- Sử dụng API keys cho các module (trong `init_config.json`)
+
+### 4. Database đầy
+
+**Giải pháp:**
+- Giảm `EVENT_RETENTION_DAYS` và `OFFLINE_HOST_RETENTION_DAYS`
+- Chạy cleanup thủ công:
+
+```bash
+# Vào container
+sudo docker exec -it bbot_osint bash
+
+# Python shell
+python3 -c "
+from app.repository import cleanup_graph
+import time
+stats = cleanup_graph(int(time.time()))
+print(stats)
+"
+```
+
+---
+
+## Tips vận hành
+
+1. **Xem logs realtime:**
+```bash
+sudo docker compose logs -f
+```
+
+2. **Restart services:**
+```bash
+sudo docker compose restart osint
+```
+
+3. **Update code:**
+```bash
+git pull
+sudo docker compose up -d --build
+```
+
+4. **Xem stats Neo4j:**
+```cypher
+// Trong Neo4j Browser
+MATCH (n) RETURN labels(n) as type, count(*) as count
+```
+
+5. **Export dữ liệu:**
+```bash
+# Query và export JSON
+curl -X POST "https://osint.example.com/query" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Token: $API_TOKEN" \
+  -d '{"domain":"evilcorp.com","limit":10000}' \
+  | jq '.results' > export.json
+```
+
+---
+
+**Chúc bạn triển khai thành công!** 🎉
+
+Nếu gặp vấn đề, vui lòng mở issue trên GitHub hoặc liên hệ.
