@@ -11,15 +11,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     ca-certificates \
+    gnupg \
+    apt-transport-https \
     git \
+    openssl \
     p7zip-full \
     unzip \
     zip \
     sudo \
+    openjdk-17-jre-headless \
   && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (for retirejs and related tools)
+RUN set -eux; \
+  ARCH="$(dpkg --print-architecture)"; \
+  case "$ARCH" in \
+    amd64) NODE_ARCH="x64" ;; \
+    arm64) NODE_ARCH="arm64" ;; \
+    *) NODE_ARCH="x64" ;; \
+  esac; \
+  curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && \
+  apt-get update && apt-get install -y --no-install-recommends nodejs && \
+  npm -v && node -v && \
+  rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Pre-install common heavy Python deps used by BBOT modules to reduce runtime installs
+RUN pip install --no-cache-dir \
+    python-Wappalyzer==0.3.1 \
+    aiohttp==3.9.5 \
+    setuptools
 
 COPY app /app/app
 COPY mcp_server /app/mcp_server
