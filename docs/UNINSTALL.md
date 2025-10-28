@@ -16,7 +16,7 @@ Khi cần sửa `init_config.json`, thêm targets mới, hoặc cập nhật API
 ### Phương pháp 1: Tạm dừng containers
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Dừng tất cả services
 sudo docker compose stop
@@ -44,7 +44,7 @@ sudo docker logs -f bbot_osint
 Nếu chỉ sửa `init_config.json` hoặc `config/bbot.yml`:
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Sửa config
 nano init_config.json
@@ -63,7 +63,7 @@ sudo docker logs -f bbot_osint | head -20
 Sửa config trong khi service đang chạy, sau đó restart:
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Service đang chạy, sửa config
 nano init_config.json
@@ -80,7 +80,7 @@ sudo docker compose up -d --build osint
 Nếu thay đổi biến môi trường:
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Dừng services
 sudo docker compose down
@@ -113,7 +113,7 @@ sudo docker logs -f bbot_osint
 #### Thêm target mới vào monitoring
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 sudo docker compose stop osint
 
 # Backup config trước
@@ -134,7 +134,7 @@ curl -H "X-API-Token: $(cat secrets/api_token)" \
 #### Thay đổi cycle sleep time
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Sửa cycle_sleep_seconds từ 3600 → 7200 (1h → 2h)
 nano init_config.json
@@ -151,7 +151,7 @@ sudo docker logs bbot_osint 2>&1 | grep "Cycle sleep"
 #### Cập nhật API keys
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Sửa API keys
 nano init_config.json
@@ -172,7 +172,7 @@ sudo docker logs bbot_osint 2>&1 | grep -i "api key"
 #### Tắt cleanup tạm thời
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Sửa .env
 nano .env
@@ -267,10 +267,10 @@ sudo docker volume prune
 
 ```bash
 # Backup secrets trước nếu cần
-cp ~/bbot-osint-mcp/secrets/credentials.txt ~/bbot-credentials-backup.txt
+cp /opt/bbot-osint-mcp/secrets/credentials.txt ~/bbot-credentials-backup.txt
 
 # Xóa toàn bộ thư mục
-rm -rf ~/bbot-osint-mcp
+rm -rf /opt/bbot-osint-mcp
 ```
 
 ### Bước 5: Dọn dẹp firewall rules (nếu không dùng nữa)
@@ -332,7 +332,7 @@ cp ~/bbot-osint-mcp/init_config.json ~/bbot-config-backup.json
 cp ~/bbot-osint-mcp/secrets/credentials.txt ~/bbot-credentials-backup.txt
 
 # Xóa source
-rm -rf ~/bbot-osint-mcp
+rm -rf /opt/bbot-osint-mcp
 ```
 
 **Để cài lại sau:**
@@ -503,7 +503,7 @@ sudo docker image prune -a -f
 
 ```bash
 # Xóa với sudo
-sudo rm -rf ~/bbot-osint-mcp
+sudo rm -rf /opt/bbot-osint-mcp
 
 # Nếu vẫn lỗi, kiểm tra process đang dùng
 sudo lsof +D ~/bbot-osint-mcp
@@ -550,7 +550,7 @@ case $choice in
     sudo docker compose down -v
     sudo docker rmi bbot-osint-mcp-osint:latest neo4j:5.23.1 caddy:2.8-alpine
     cd ~
-    rm -rf ~/bbot-osint-mcp
+    rm -rf /opt/bbot-osint-mcp
     echo "✅ Đã gỡ hoàn toàn!"
     ;;
   2)
@@ -560,7 +560,7 @@ case $choice in
     cd ~/bbot-osint-mcp
     sudo docker compose down
     cd ~
-    rm -rf ~/bbot-osint-mcp
+    rm -rf /opt/bbot-osint-mcp
     echo "✅ Đã gỡ cài đặt! Dữ liệu được giữ trong Docker volumes."
     echo "Backup: ~/bbot-config-backup.json, ~/bbot-credentials-backup.txt"
     ;;

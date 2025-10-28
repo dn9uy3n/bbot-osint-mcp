@@ -16,7 +16,7 @@
 
 File `init_config.json` là file cấu hình trung tâm cho BBOT OSINT Continuous Monitoring Stack. Tất cả các thiết lập quan trọng được định nghĩa ở đây.
 
-**Vị trí file:** `~/bbot-osint-mcp/init_config.json`
+**Vị trí file:** `/opt/bbot-osint-mcp/init_config.json`
 
 **Cách apply thay đổi:**
 ```bash

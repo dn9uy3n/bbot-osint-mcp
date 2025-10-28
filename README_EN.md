@@ -664,7 +664,7 @@ sudo docker compose exec neo4j neo4j-admin database dump neo4j \
 When you need to add new targets, update API keys, or change sleep times:
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Stop OSINT service
 sudo docker compose stop osint
@@ -739,16 +739,16 @@ See detailed guide: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
 ### Quick uninstall (remove all)
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 sudo docker compose down -v
 sudo docker rmi bbot-osint-mcp-osint:latest neo4j:5.23.1 caddy:2.8-alpine
-cd ~ && rm -rf ~/bbot-osint-mcp
+cd /opt && sudo rm -rf /opt/bbot-osint-mcp
 ```
 
 ### Or use automated script
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 chmod +x scripts/uninstall.sh
 ./scripts/uninstall.sh
 ```

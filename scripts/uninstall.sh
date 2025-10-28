@@ -37,8 +37,8 @@ case $choice in
     echo "Starting complete removal..."
     
     # Stop and remove containers + volumes
-    if [ -d ~/bbot-osint-mcp ]; then
-      cd ~/bbot-osint-mcp
+    if [ -d /opt/bbot-osint-mcp ]; then
+      cd /opt/bbot-osint-mcp
       echo "→ Stopping containers..."
       sudo docker compose down -v || true
     fi
@@ -51,8 +51,8 @@ case $choice in
     
     # Remove source code
     echo "→ Removing source code..."
-    cd ~
-    rm -rf ~/bbot-osint-mcp
+    cd /opt
+    rm -rf /opt/bbot-osint-mcp
     
     echo ""
     echo "✅ Complete removal finished!"
@@ -83,15 +83,15 @@ case $choice in
     echo "Starting uninstall with data preservation..."
     
     # Backup configs
-    if [ -f ~/bbot-osint-mcp/init_config.json ]; then
+    if [ -f /opt/bbot-osint-mcp/init_config.json ]; then
       echo "→ Backing up config..."
-      cp ~/bbot-osint-mcp/init_config.json ~/bbot-config-backup.json
+      cp /opt/bbot-osint-mcp/init_config.json ~/bbot-config-backup.json
       echo "  Saved to: ~/bbot-config-backup.json"
     fi
     
-    if [ -f ~/bbot-osint-mcp/secrets/credentials.txt ]; then
+    if [ -f /opt/bbot-osint-mcp/secrets/credentials.txt ]; then
       echo "→ Backing up credentials..."
-      cp ~/bbot-osint-mcp/secrets/credentials.txt ~/bbot-credentials-backup.txt
+      cp /opt/bbot-osint-mcp/secrets/credentials.txt ~/bbot-credentials-backup.txt
       echo "  Saved to: ~/bbot-credentials-backup.txt"
     fi
     
@@ -104,8 +104,8 @@ case $choice in
       ubuntu tar czf /backup/neo4j-data-$(date +%Y%m%d-%H%M%S).tar.gz /data 2>/dev/null || true
     
     # Stop containers (without removing volumes)
-    if [ -d ~/bbot-osint-mcp ]; then
-      cd ~/bbot-osint-mcp
+    if [ -d /opt/bbot-osint-mcp ]; then
+      cd /opt/bbot-osint-mcp
       echo "→ Stopping containers..."
       sudo docker compose down
     fi
@@ -117,8 +117,8 @@ case $choice in
     
     # Remove source
     echo "→ Removing source code..."
-    cd ~
-    rm -rf ~/bbot-osint-mcp
+    cd /opt
+    rm -rf /opt/bbot-osint-mcp
     
     echo ""
     echo "✅ Uninstall completed with data preservation!"
@@ -155,8 +155,8 @@ case $choice in
     echo ""
     echo "Deleting Neo4j data..."
     
-    if [ -d ~/bbot-osint-mcp ]; then
-      cd ~/bbot-osint-mcp
+    if [ -d /opt/bbot-osint-mcp ]; then
+      cd /opt/bbot-osint-mcp
       
       # Stop Neo4j
       echo "→ Stopping Neo4j..."
@@ -183,7 +183,7 @@ case $choice in
       echo ""
       echo "The scanner will start from scratch on next cycle."
     else
-      echo "Error: ~/bbot-osint-mcp directory not found"
+      echo "Error: /opt/bbot-osint-mcp directory not found"
       exit 1
     fi
     ;;

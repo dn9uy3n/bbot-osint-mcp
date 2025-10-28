@@ -698,7 +698,7 @@ sudo docker compose exec neo4j neo4j-admin database dump neo4j \
 Khi cần thêm targets mới, cập nhật API keys, hoặc thay đổi sleep times:
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 
 # Dừng OSINT service
 sudo docker compose stop osint
@@ -773,16 +773,16 @@ Xem hướng dẫn chi tiết: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
 ### Gỡ nhanh (xóa tất cả)
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 sudo docker compose down -v
 sudo docker rmi bbot-osint-mcp-osint:latest neo4j:5.23.1 caddy:2.8-alpine
-cd ~ && rm -rf ~/bbot-osint-mcp
+cd /opt && sudo rm -rf /opt/bbot-osint-mcp
 ```
 
 ### Hoặc dùng script tự động
 
 ```bash
-cd ~/bbot-osint-mcp
+cd /opt/bbot-osint-mcp
 chmod +x scripts/uninstall.sh
 ./scripts/uninstall.sh
 ```
