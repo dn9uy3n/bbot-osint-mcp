@@ -39,6 +39,9 @@ def build_scanner(req: ScanRequest) -> Scanner:
 
     # Sanitize flags: drop unknown ones (e.g., presets mistakenly set as flags)
     flags = [f for f in (req.flags or []) if f in ALLOWED_FLAGS]
+    # Enforce safe mode to avoid root installs
+    if "safe" not in flags:
+        flags.append("safe")
     if req.allow_deadly:
         flags.append("allow-deadly")
     return Scanner(*req.targets, presets=presets, flags=flags, config=config)
