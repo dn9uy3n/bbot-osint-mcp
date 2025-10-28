@@ -627,14 +627,33 @@ Presets: supported values are `subdomain-enum`, `spider`, `email-enum`, `web-bas
 
 ### Querying Neo4j
 
-Access Neo4j Browser: `http://VPS_IP:7474` (only from localhost, use SSH tunnel)
+Access Neo4j Browser securely via SSH Tunnel (no public exposure):
 
+1) On VPS, start local-only forwarders to the `neo4j` container:
 ```bash
-# SSH tunnel to access Neo4j
-ssh -L 7474:localhost:7474 -L 7687:localhost:7687 user@VPS_IP
+sudo docker run -d --rm --name neo4j-forward-7474 \
+  --network bbot-osint-mcp_internal \
+  -p 127.0.0.1:7474:7474 \
+  alpine/socat tcp-l:7474,fork,reuseaddr tcp:bbot_neo4j:7474
+
+sudo docker run -d --rm --name neo4j-forward-7687 \
+  --network bbot-osint-mcp_internal \
+  -p 127.0.0.1:7687:7687 \
+  alpine/socat tcp-l:7687,fork,reuseaddr tcp:bbot_neo4j:7687
 ```
 
-Then open browser: `http://localhost:7474`
+2) From local machine, create tunnels:
+```bash
+ssh -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
+```
+
+3) Open: `http://localhost:7474` (Bolt: `bolt://localhost:7687`)
+Username: `neo4j`, Password: from `secrets/neo4j_password`.
+
+4) Stop forwarders when done:
+```bash
+sudo docker rm -f neo4j-forward-7474 neo4j-forward-7687
+```
 
 **Example queries:**
 
