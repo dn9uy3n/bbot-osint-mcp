@@ -32,4 +32,8 @@ logs/**/*.log
 logs/**/*.txt
 logs/**/*.json
 
+# BBOT runtime data
+cache/
+scans/
+
 
