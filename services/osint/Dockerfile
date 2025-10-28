@@ -17,8 +17,10 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
 COPY mcp /app/mcp
-# Provide example config by default; mount real init_config.json in production
-COPY init_config.json.example /app/init_config.json
+
+# init_config.json will be mounted from host via docker-compose volumes
+# If not mounted, create empty template
+RUN echo '{"targets":[],"bbot_modules":{},"TELEGRAM_BOT_TOKEN":"","TELEGRAM_CHAT_ID":"","scan_defaults":{"presets":["subdomain-enum"],"flags":[],"max_workers":2,"spider_depth":2,"spider_distance":1,"spider_links_per_page":10,"allow_deadly":false,"target_sleep_seconds":300,"cycle_sleep_seconds":3600}}' > /app/init_config.json.default
 
 # Non-root user (optional)
 RUN useradd -ms /bin/bash appuser

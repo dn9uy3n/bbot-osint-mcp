@@ -52,6 +52,8 @@ services:
     volumes:
       # Mount host bbot config (API keys) into the expected location for BBOT
       - ${BBOT_CONFIG_HOST_PATH:-./config/bbot.yml}:/root/.config/bbot/bbot.yml:ro
+      # Mount init_config.json from project root
+      - ./init_config.json:/app/init_config.json:ro
     command: ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     networks:
       - internal
