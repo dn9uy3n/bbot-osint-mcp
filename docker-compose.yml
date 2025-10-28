@@ -56,6 +56,8 @@ services:
     user: "0:0"
     env_file:
       - .env
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
     volumes:
       # BBOT config will be generated from init_config.json at startup
       # Mount init_config.json from project root
@@ -81,10 +83,7 @@ services:
       - timeout:2
     tmpfs:
       - /tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # Removed hardening to allow runtime package installs by BBOT modules (Ansible/apt)
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/healthz"]
       interval: 30s

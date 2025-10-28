@@ -16,7 +16,6 @@ ALLOWED_FLAGS = {
     # Subset of BBOT runtime flags we allow to pass through
     "safe",
     "active",
-    "ignore-failed-deps",
 }
 
 
@@ -43,8 +42,6 @@ def build_scanner(req: ScanRequest) -> Scanner:
     # Enforce safe mode to avoid root installs
     if "safe" not in flags:
         flags.append("safe")
-    if "ignore-failed-deps" not in flags:
-        flags.append("ignore-failed-deps")
     if req.allow_deadly:
         flags.append("allow-deadly")
     # Blacklist some heavy/ansible modules by passing flags if available

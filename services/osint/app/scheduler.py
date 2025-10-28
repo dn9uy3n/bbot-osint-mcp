@@ -61,6 +61,7 @@ class ContinuousScanner:
                         spider_links_per_page=scan_defaults.get("spider_links_per_page", 10),
                         allow_deadly=scan_defaults.get("allow_deadly", False),
                     )
+                    logger.info(f"Resolved presets={req.presets} flags={req.flags} for target={target}")
                     
                     # Run scan
                     event_count = 0
