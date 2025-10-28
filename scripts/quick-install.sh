@@ -20,6 +20,10 @@ cd "$REPO_DIR"
 # 1) Ensure local runtime directories exist
 mkdir -p logs cache scans secrets
 chmod 777 logs cache scans || true
+chmod 700 secrets || true
+
+# Ensure repo Neo4j conf is readable
+chmod -R 755 neo4j/conf || true
 
 # 2) Ensure docker daemon uses reliable DNS (if not already)
 if [ "$(id -u)" -ne 0 ]; then
@@ -60,10 +64,23 @@ if ! [ -f secrets/api_token ] || ! [ -f secrets/neo4j_password ]; then
   fi
 fi
 
-# 4) Bring up stack
+# 4) (Optional) Configure UFW firewall
+if command -v ufw >/dev/null 2>&1; then
+  echo "Configuring UFW (80/443/22 and optional 8000)..."
+  $SUDO ufw allow 80/tcp || true
+  $SUDO ufw allow 443/tcp || true
+  $SUDO ufw allow 22/tcp || true
+  # Expose direct API/MCP if desired
+  $SUDO ufw allow 8000/tcp comment 'bbot-osint API/MCP' || true
+fi
+
+# 5) Bring up stack
 $SUDO docker compose down || true
 $SUDO docker compose up -d --build
 
-# 5) Show quick status
+# 6) Show quick status
 $SUDO docker ps
-echo "\nTip: Check logs: sudo docker logs -f bbot_osint"
+echo "\nTips:"
+echo "- Check OSINT logs: sudo docker logs -f bbot_osint"
+echo "- MCP tools (local on VPS): curl -H 'X-API-Token: $(cat secrets/api_token)' http://127.0.0.1:8000/mcp/tools"
+echo "- Status (via domain if configured in Caddy): curl -H 'X-API-Token: $(cat secrets/api_token)' https://<your-domain>/mcp/tools/osint.status"

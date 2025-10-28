@@ -441,34 +441,14 @@ There is no manual scan endpoint. The scanner reads `init_config.json` and runs 
 
 ### Access Neo4j via SSH Tunnel (No Public Exposure)
 
-Neo4j is on the internal Docker network and not exposed publicly. To access Neo4j Browser and Bolt driver securely:
+Neo4j ports are published locally on the VPS: 127.0.0.1:7474 (HTTP) and 127.0.0.1:7687 (Bolt). Access securely from your local machine via SSH tunnels (no socat needed):
 
-1) On the VPS, start local-only forwarders from host to the `neo4j` container (one-time or when needed):
 ```bash
-sudo docker run -d --rm --name neo4j-forward-7474 \
-  --network bbot-osint-mcp_internal \
-  -p 127.0.0.1:7474:7474 \
-  alpine/socat tcp-l:7474,fork,reuseaddr tcp:bbot_neo4j:7474
-
-sudo docker run -d --rm --name neo4j-forward-7687 \
-  --network bbot-osint-mcp_internal \
-  -p 127.0.0.1:7687:7687 \
-  alpine/socat tcp-l:7687,fork,reuseaddr tcp:bbot_neo4j:7687
+ssh -N -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
 ```
 
-2) From your local machine, create SSH tunnels:
-```bash
-ssh -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
-```
-
-3) Open Neo4j Browser locally: `http://localhost:7474`
-- Bolt URI for drivers: `bolt://localhost:7687`
-- Username: `neo4j`; Password: from `secrets/neo4j_password` (or `.env`)
-
-4) When done, stop forwarders on the VPS:
-```bash
-sudo docker rm -f neo4j-forward-7474 neo4j-forward-7687
-```
+Then open: `http://localhost:7474` (Bolt: `bolt://localhost:7687`)
+Username: `neo4j`; Password: from `secrets/neo4j_password`.
 
 **Telegram notification**: If configured, you'll receive a message when scan completes.
 

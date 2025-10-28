@@ -666,31 +666,15 @@ Call MCP tool: osint.status {}
 
 ### Truy vấn Neo4j
 
-Truy cập Neo4j Browser: `http://localhost:7474` (qua SSH Tunnel an toàn)
+Neo4j đã được publish cục bộ trên VPS ở 127.0.0.1:7474 (HTTP) và 127.0.0.1:7687 (Bolt). Truy cập an toàn từ máy local qua SSH Tunnel (không cần chạy socat):
 
 ```bash
-# Trên VPS: forward cục bộ vào container
-sudo docker run -d --rm --name neo4j-forward-7474 \
-  --network bbot-osint-mcp_internal \
-  -p 127.0.0.1:7474:7474 \
-  alpine/socat tcp-l:7474,fork,reuseaddr tcp:bbot_neo4j:7474
-
-sudo docker run -d --rm --name neo4j-forward-7687 \
-  --network bbot-osint-mcp_internal \
-  -p 127.0.0.1:7687:7687 \
-  alpine/socat tcp-l:7687,fork,reuseaddr tcp:bbot_neo4j:7687
-
-# Từ máy local: tạo SSH tunnels
-ssh -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
+# Từ máy local
+ssh -N -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
 ```
 
-Sau đó mở trình duyệt: `http://localhost:7474` (Bolt: `bolt://localhost:7687`)
-User: `neo4j`, Password: từ `secrets/neo4j_password` (hoặc `.env`)
-
-Khi xong, dừng forwarders trên VPS:
-```bash
-sudo docker rm -f neo4j-forward-7474 neo4j-forward-7687
-```
+Sau đó mở: `http://localhost:7474` (Bolt: `bolt://localhost:7687`)
+User: `neo4j`, Password: từ `secrets/neo4j_password`.
 
 **Ví dụ queries:**
 
