@@ -14,7 +14,7 @@ mcp_app = FastAPI()
 
 
 # Enforce token via middleware
-@mcp_app.app.middleware("http")
+@mcp_app.middleware("http")
 async def token_middleware(request: Request, call_next):
     expected = settings.api_token
     provided = request.headers.get("X-API-Token")
