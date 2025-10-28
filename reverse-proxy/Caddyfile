@@ -6,7 +6,7 @@
   encode gzip
   tls {$LE_EMAIL}
 
-  reverse_proxy bbot_osint:8000 {
+  reverse_proxy osint:8000 {
     header_up X-Forwarded-Proto {scheme}
     header_up Host {host}
     header_up X-Real-IP {remote}
