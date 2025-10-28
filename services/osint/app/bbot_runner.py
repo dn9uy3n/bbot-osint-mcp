@@ -1,4 +1,4 @@
-from typing import AsyncIterator, Iterator
+from typing import AsyncIterator, Iterator, Any, Dict
 from bbot.scanner import Scanner
 from .models import ScanRequest
 from loguru import logger
@@ -49,15 +49,35 @@ def build_scanner(req: ScanRequest) -> Scanner:
     return Scanner(*req.targets, presets=presets, flags=flags, config=config)
 
 
+def _event_to_dict(obj: Any) -> Dict[str, Any]:
+    if isinstance(obj, dict):
+        return obj
+    for attr in ("asdict", "to_dict"):
+        fn = getattr(obj, attr, None)
+        if callable(fn):
+            try:
+                d = fn()
+                if isinstance(d, dict):
+                    return d
+            except Exception:
+                pass
+    # Fallback: use __dict__ if present
+    d2 = getattr(obj, "__dict__", None)
+    if isinstance(d2, dict):
+        return d2
+    # Last resort: string representation
+    return {"raw": str(obj)}
+
+
 def start_scan(req: ScanRequest) -> Iterator[dict]:
     scan = build_scanner(req)
     for event in scan.start():
-        yield event.asdict()
+        yield _event_to_dict(event)
 
 
 async def async_start_scan(req: ScanRequest) -> AsyncIterator[dict]:
     scan = build_scanner(req)
     async for event in scan.async_start():
-        yield event.asdict()
+        yield _event_to_dict(event)
 
 
