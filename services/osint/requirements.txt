@@ -1,6 +1,6 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-bbot==2.1.7
+bbot>=2.0.0,<3.0.0
 neo4j==5.23.1
 pydantic==2.9.2
 python-dotenv==1.0.1
@@ -11,6 +11,7 @@ ujson==5.10.0
 loguru==0.7.2
 pyyaml==6.0.2
 typing_extensions==4.12.2
+python-telegram-bot==21.0
 
 # MCP server library (Model Context Protocol) - query only
 mcp==1.1.0
