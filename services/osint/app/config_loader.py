@@ -32,10 +32,10 @@ def apply_init_config():
     if isinstance(scan_defaults, dict):
         settings.scan_defaults = scan_defaults
     
-    # BBOT API keys: write to /root/.config/bbot/bbot.yml from init_config.json
+    # BBOT modules config: API keys and per-module settings (e.g., enabled:false)
     bbot_modules = cfg.get("bbot_modules")
-    if isinstance(bbot_modules, dict):
-        # Merge into existing file path (mounted path). We avoid write if no mount.
+    bbot_disable = cfg.get("bbot_disable_modules")
+    if isinstance(bbot_modules, dict) or isinstance(bbot_disable, list):
         try:
             from pathlib import Path
             import yaml
@@ -46,9 +46,17 @@ def apply_init_config():
                 current = yaml.safe_load(bbot_path.read_text(encoding="utf-8")) or {}
             if "modules" not in current:
                 current["modules"] = {}
-            # merge keys
-            for mod, cfgval in bbot_modules.items():
-                current["modules"][mod] = cfgval
+            # merge module configs
+            if isinstance(bbot_modules, dict):
+                for mod, cfgval in bbot_modules.items():
+                    current["modules"][mod] = cfgval
+            # disable listed modules
+            if isinstance(bbot_disable, list):
+                for mod in bbot_disable:
+                    mod_name = str(mod)
+                    if mod_name not in current["modules"]:
+                        current["modules"][mod_name] = {}
+                    current["modules"][mod_name]["enabled"] = False
             bbot_path.write_text(yaml.safe_dump(current, sort_keys=False, allow_unicode=True), encoding="utf-8")
         except Exception:
             pass

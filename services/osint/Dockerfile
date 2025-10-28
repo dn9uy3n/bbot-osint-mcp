@@ -20,6 +20,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zip \
     sudo \
     default-jre-headless \
+    chromium \
+    fonts-liberation \
+    libasound2 \
+    libnss3 \
+    libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 libgbm1 \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (for retirejs and related tools)
@@ -43,6 +48,9 @@ RUN pip install --no-cache-dir \
     python-Wappalyzer==0.3.1 \
     aiohttp==3.9.5 \
     setuptools
+
+# Hint for gowitness headless chromium
+ENV CHROME_PATH=/usr/bin/chromium
 
 COPY app /app/app
 COPY mcp_server /app/mcp_server
