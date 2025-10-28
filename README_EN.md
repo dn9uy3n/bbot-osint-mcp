@@ -29,7 +29,7 @@ A **continuous monitoring** system that automatically scans targets in cycles, s
   - `cycle_sleep_seconds`: Rest after scanning all targets before starting new cycle.
 - **Full Data Fidelity**: Store complete BBOT data in Neo4j (DNS_NAME, OPEN_TCP_PORT, TECHNOLOGY, Event raw data).
 - **Incremental Updates**: Subsequent scans only update/add new data, never delete old data (except cleanup by retention policy).
-- **MCP Query Interface**: Cursor can connect via MCP to query data (`osint.query`, `osint.events.query`, `osint.status`).
+- **MCP Query Interface**: Cursor can connect via MCP to query data (`/mcp/tools/osint.query`, `/mcp/tools/osint.events.query`, `/mcp/tools/osint.status`).
 - **REST API**: Query hosts and events via HTTP API.
 - **Automatic Cleanup**: Delete expired events, long-offline hosts, and orphan nodes after each cycle.
 - **Telegram Notifications**: Notification after each completed scan cycle.
@@ -321,7 +321,7 @@ nano init_config.json
   
   "scan_defaults": {
     "presets": ["subdomain-enum"],
-    "flags": [],
+    "flags": ["safe"],
     "max_workers": 2,
     "spider_depth": 2,
     "spider_distance": 1,
@@ -350,6 +350,13 @@ nano init_config.json
    - **Recommended**: 3600-7200s (1-2 hours) for frequent monitoring, 86400s (24 hours) for daily audit.
 
 📖 **Full details on 2 sleep parameters**: See [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+
+#### Presets and Flags (Updated)
+- Supported presets: `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`.
+- Supported flags: `safe`, `active`.
+- Any invalid preset will be ignored and default to `subdomain-enum`.
+- Any invalid flag (e.g., mistakenly adding a preset into flags) will be dropped automatically.
+- Runtime dependency installs are disabled in container; modules requiring root installs will be skipped.
 
 ### Step 6: Verify DNS and Firewall
 
@@ -397,6 +404,37 @@ curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
 ### Step 9: Scans run automatically
 
 There is no manual scan endpoint. The scanner reads `init_config.json` and runs cycles continuously.
+
+### Access Neo4j via SSH Tunnel (No Public Exposure)
+
+Neo4j is on the internal Docker network and not exposed publicly. To access Neo4j Browser and Bolt driver securely:
+
+1) On the VPS, start local-only forwarders from host to the `neo4j` container (one-time or when needed):
+```bash
+sudo docker run -d --rm --name neo4j-forward-7474 \
+  --network bbot-osint-mcp_internal \
+  -p 127.0.0.1:7474:7474 \
+  alpine/socat tcp-l:7474,fork,reuseaddr tcp:bbot_neo4j:7474
+
+sudo docker run -d --rm --name neo4j-forward-7687 \
+  --network bbot-osint-mcp_internal \
+  -p 127.0.0.1:7687:7687 \
+  alpine/socat tcp-l:7687,fork,reuseaddr tcp:bbot_neo4j:7687
+```
+
+2) From your local machine, create SSH tunnels:
+```bash
+ssh -L 7474:127.0.0.1:7474 -L 7687:127.0.0.1:7687 user@VPS_IP
+```
+
+3) Open Neo4j Browser locally: `http://localhost:7474`
+- Bolt URI for drivers: `bolt://localhost:7687`
+- Username: `neo4j`; Password: from `secrets/neo4j_password` (or `.env`)
+
+4) When done, stop forwarders on the VPS:
+```bash
+sudo docker rm -f neo4j-forward-7474 neo4j-forward-7687
+```
 
 **Telegram notification**: If configured, you'll receive a message when scan completes.
 
@@ -549,6 +587,7 @@ You'll see 2 tools:
 
 1. **osint.query**: Query hosts from Neo4j
 2. **osint.events.query**: Query detailed events
+3. **osint.status**: Scanner status/config
 
 **Example in Cursor chat:**
 
