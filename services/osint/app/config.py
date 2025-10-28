@@ -36,6 +36,9 @@ class Settings(BaseModel):
     init_config_path: str = os.getenv("INIT_CONFIG_PATH", "/app/init_config.json")
     default_targets: list[str] = []
     scan_defaults: dict = {}
+    # BBOT module configuration (from init_config.json)
+    bbot_modules: dict = {}
+    bbot_disable_modules: list[str] = []
 
 
 settings = Settings()

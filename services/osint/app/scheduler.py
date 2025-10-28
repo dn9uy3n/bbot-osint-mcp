@@ -36,6 +36,8 @@ class ContinuousScanner:
         logger.info(f"Targets: {targets}")
         logger.info(f"Cycle sleep (between full cycles): {cycle_sleep}s")
         logger.info(f"Target sleep (between each target): {target_sleep}s")
+        if settings.bbot_disable_modules:
+            logger.info(f"Disabled modules (from init_config): {settings.bbot_disable_modules}")
         
         while self.running:
             cycle_start = time.time()

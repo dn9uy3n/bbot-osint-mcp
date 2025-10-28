@@ -1,6 +1,7 @@
 from typing import AsyncIterator, Iterator, Any, Dict
 from bbot.scanner import Scanner
 from .models import ScanRequest
+from .config import settings
 from loguru import logger
 
 ALLOWED_PRESETS = {
@@ -28,6 +29,25 @@ def build_scanner(req: ScanRequest) -> Scanner:
             "spider_links_per_page": req.spider_links_per_page,
         },
     }
+    # Apply module-level config and disable list at runtime as a safety net
+    # BBOT supports YAML config; here we also pass through known module settings when possible
+    # and ensure disabled modules are not executed by forcing them disabled in config
+    disabled = set(settings.bbot_disable_modules or [])
+    if settings.bbot_modules:
+        config_modules = config.setdefault("modules", {})
+        for mod, mod_cfg in settings.bbot_modules.items():
+            try:
+                config_modules[mod] = mod_cfg
+            except Exception:
+                pass
+    if disabled:
+        config_modules = config.setdefault("modules", {})
+        for mod in disabled:
+            mod_cfg = config_modules.get(mod, {})
+            # Do not re-enable if user explicitly enabled; we respect explicit disable
+            mod_cfg["enabled"] = False
+            config_modules[mod] = mod_cfg
+        logger.info(f"Runtime-disabled modules: {sorted(disabled)}")
     # Sanitize presets: drop unknown, default to subdomain-enum if empty
     presets = [p for p in (req.presets or []) if p in ALLOWED_PRESETS]
     if not presets:

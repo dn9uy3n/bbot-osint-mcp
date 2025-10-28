@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 from .config import settings
+from loguru import logger
 
 
 def load_init_config() -> Dict[str, Any]:
@@ -35,11 +36,16 @@ def apply_init_config():
     # BBOT modules config: API keys and per-module settings (e.g., enabled:false)
     bbot_modules = cfg.get("bbot_modules")
     bbot_disable = cfg.get("bbot_disable_modules")
+    if isinstance(bbot_modules, dict):
+        settings.bbot_modules = bbot_modules
+    if isinstance(bbot_disable, list):
+        settings.bbot_disable_modules = [str(m) for m in bbot_disable]
+
     if isinstance(bbot_modules, dict) or isinstance(bbot_disable, list):
         try:
-            from pathlib import Path
             import yaml
-            bbot_path = Path("/root/.config/bbot/bbot.yml")
+            home = Path.home()
+            bbot_path = home / ".config" / "bbot" / "bbot.yml"
             bbot_path.parent.mkdir(parents=True, exist_ok=True)
             current = {}
             if bbot_path.exists():
@@ -58,7 +64,8 @@ def apply_init_config():
                         current["modules"][mod_name] = {}
                     current["modules"][mod_name]["enabled"] = False
             bbot_path.write_text(yaml.safe_dump(current, sort_keys=False, allow_unicode=True), encoding="utf-8")
-        except Exception:
-            pass
+            logger.info(f"Applied BBOT module config at {bbot_path}; disabled={settings.bbot_disable_modules}")
+        except Exception as e:
+            logger.warning(f"Failed to write BBOT config: {e}")
 
 
