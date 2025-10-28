@@ -33,8 +33,8 @@ services:
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
-      - neo4j_conf:/var/lib/neo4j/conf
-      - ./neo4j/neo4j.conf:/data/conf/neo4j.conf
+      - ./neo4j/conf:/var/lib/neo4j/conf
+      - ./neo4j/conf:/data/conf
       - ./neo4j/neo4j.conf:/var/lib/neo4j/conf/neo4j.conf:ro
     ports:
       - "127.0.0.1:7474:7474" # HTTP UI (bind to localhost only)
@@ -105,7 +105,6 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs:
-  neo4j_conf:
   caddy_data:
   caddy_config:
 
