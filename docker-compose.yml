@@ -33,6 +33,7 @@ services:
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
+      - neo4j_conf:/var/lib/neo4j/conf
       - ./neo4j/neo4j.conf:/data/conf/neo4j.conf
       - ./neo4j/neo4j.conf:/var/lib/neo4j/conf/neo4j.conf:ro
     ports:
@@ -104,6 +105,7 @@ services:
 volumes:
   neo4j_data:
   neo4j_logs:
+  neo4j_conf:
   caddy_data:
   caddy_config:
 
