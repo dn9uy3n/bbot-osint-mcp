@@ -11,6 +11,29 @@ Hệ thống giám sát OSINT liên tục dựa trên BBOT với FastAPI, Neo4j 
 - **[📝 Hướng dẫn viết init_config.json](docs/INIT_CONFIG_GUIDE.md)** ⭐
 - [Hướng dẫn cài đặt chi tiết](docs/INSTALLATION.md)
   - Cài đặt nhanh: chạy `./scripts/quick-install.sh` (thiết lập DNS Docker, tạo thư mục runtime, sinh secrets, build & up)
+### Cài đặt nhanh (Quick Install)
+
+```bash
+cd /opt
+sudo git clone https://github.com/dn9uy3n/bbot-osint-mcp.git
+cd bbot-osint-mcp
+
+# (tuỳ chọn) đặt sẵn file init_config.json của bạn vào thư mục repo
+# nano init_config.json
+
+chmod +x scripts/quick-install.sh
+./scripts/quick-install.sh
+
+# Kiểm tra logs
+sudo docker logs -f bbot_osint
+```
+
+Script sẽ:
+- Thiết lập DNS cho Docker daemon (1.1.1.1, 8.8.8.8) để tránh lỗi name resolution
+- Tạo thư mục runtime: `logs/`, `cache/`, `scans/`, `secrets/`
+- Sinh secrets nếu thiếu (API_TOKEN, Neo4j password)
+- Build và khởi động toàn bộ stack
+
 - [Hướng dẫn sử dụng API](docs/API_USAGE.md)
 - [Tích hợp Cursor MCP](docs/MCP_INTEGRATION.md)
 - [Neo4j Data Model](docs/NEO4J_MODEL.md)

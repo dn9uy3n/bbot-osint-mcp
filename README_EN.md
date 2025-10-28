@@ -179,6 +179,11 @@ What it does:
 - Generates secrets if missing
 - Builds and starts the stack
 
+Verify:
+```bash
+sudo docker logs -f bbot_osint
+```
+
 ### Requirements
 
 - VPS running Ubuntu 22.04 or 24.04
