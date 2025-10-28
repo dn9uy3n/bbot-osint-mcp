@@ -25,7 +25,7 @@ services:
     container_name: bbot_neo4j
     restart: unless-stopped
     environment:
-      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
       - NEO4J_dbms_memory_heap_initial__size=1G
       - NEO4J_dbms_memory_heap_max__size=1G
       - NEO4J_dbms_allow__upgrade=true
@@ -35,9 +35,6 @@ services:
       - neo4j_logs:/logs
     networks:
       - internal
-    secrets:
-      - neo4j_password
-    command: ["/bin/sh", "-lc", "export NEO4J_AUTH=${NEO4J_USERNAME}/$(cat /run/secrets/neo4j_password); exec /docker-entrypoint.sh neo4j"]
 
   osint:
     build:
