@@ -397,9 +397,15 @@ dig +short osint.example.com
 # Phải trả về IP VPS của bạn
 
 # Kiểm tra firewall (Ubuntu UFW)
+# BẮT BUỘC khi dùng reverse proxy (Caddy): mở 80,443
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw allow 22/tcp
+
+# Tuỳ chọn: nếu bạn truy cập trực tiếp API/MCP qua IP:8000 (không qua domain/Caddy)
+# thì cần mở thêm 8000/tcp. Lưu ý: API yêu cầu X-API-Token, nhưng cổng sẽ public.
+sudo ufw allow 8000/tcp comment 'bbot-osint API/MCP'
+
 sudo ufw enable
 sudo ufw status
 ```

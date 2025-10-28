@@ -394,9 +394,15 @@ dig +short osint.example.com
 # Should return your VPS IP
 
 # Check firewall (Ubuntu UFW)
+# REQUIRED when using reverse proxy (Caddy): open 80,443
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw allow 22/tcp
+
+# Optional: if you access API/MCP directly via IP:8000 (without domain/Caddy)
+# you must also open 8000/tcp. Note: the API requires X-API-Token, but the port will be public.
+sudo ufw allow 8000/tcp comment 'bbot-osint API/MCP'
+
 sudo ufw enable
 sudo ufw status
 ```
