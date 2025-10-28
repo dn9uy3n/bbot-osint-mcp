@@ -6,7 +6,7 @@ from .repository import query_subdomains, ensure_constraints, query_events
 from .config import settings
 from .config_loader import apply_init_config
 from .scheduler import scanner
-from mcp.server import get_app as get_mcp_app
+from mcp_server.server import get_app as get_mcp_app
 
 app = FastAPI(title="BBOT OSINT Monitoring API", default_response_class=ORJSONResponse)
 

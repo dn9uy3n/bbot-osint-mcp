@@ -16,7 +16,7 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
-COPY mcp /app/mcp
+COPY mcp_server /app/mcp_server
 
 # init_config.json will be mounted from host via docker-compose volumes
 # If not mounted, create empty template
