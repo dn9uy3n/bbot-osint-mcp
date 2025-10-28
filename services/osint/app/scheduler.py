@@ -92,10 +92,10 @@ class ContinuousScanner:
             
             # Telegram notification
             msg = (
-                f"Scan cycle completed\\n"
-                f"Duration: {cycle_elapsed}s\\n"
-                f"Targets: {len(targets)}\\n"
-                f"Events: {total_events}\\n"
+                f"Scan cycle completed\n"
+                f"Duration: {cycle_elapsed}s\n"
+                f"Targets: {len(targets)}\n"
+                f"Events: {total_events}\n"
                 f"Cleanup: {stats.get('deleted_events',0)} events, {stats.get('deleted_offline_hosts',0)} hosts, {stats.get('deleted_orphans',0)} orphans"
             )
             try:

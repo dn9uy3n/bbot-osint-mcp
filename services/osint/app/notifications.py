@@ -9,8 +9,7 @@ async def notify_telegram(message: str) -> bool:
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
     data: Dict[str, str] = {
         "chat_id": settings.telegram_chat_id,
-        "text": message,
-        "parse_mode": "MarkdownV2",
+        "text": message,  # send as plain text to preserve newlines
         "disable_web_page_preview": "true",
     }
     try:

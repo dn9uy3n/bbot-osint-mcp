@@ -10,6 +10,7 @@ Hệ thống giám sát OSINT liên tục dựa trên BBOT với FastAPI, Neo4j 
 - [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
 - **[📝 Hướng dẫn viết init_config.json](docs/INIT_CONFIG_GUIDE.md)** ⭐
 - [Hướng dẫn cài đặt chi tiết](docs/INSTALLATION.md)
+  - Cài đặt nhanh: chạy `./scripts/quick-install.sh` (thiết lập DNS Docker, tạo thư mục runtime, sinh secrets, build & up)
 - [Hướng dẫn sử dụng API](docs/API_USAGE.md)
 - [Tích hợp Cursor MCP](docs/MCP_INTEGRATION.md)
 - [Neo4j Data Model](docs/NEO4J_MODEL.md)

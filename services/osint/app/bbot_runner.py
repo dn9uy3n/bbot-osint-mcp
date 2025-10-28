@@ -47,6 +47,8 @@ def build_scanner(req: ScanRequest) -> Scanner:
         flags.append("ignore-failed-deps")
     if req.allow_deadly:
         flags.append("allow-deadly")
+    # Blacklist some heavy/ansible modules by passing flags if available
+    # Note: BBOT CLI supports --skip-modules; as Python API, we filter presets instead by not enabling those presets
     return Scanner(*req.targets, presets=presets, flags=flags, config=config)
 
 

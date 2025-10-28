@@ -163,6 +163,22 @@ graph LR
 
 ## Step-by-Step Installation Guide
 
+### Quick Install (Recommended)
+
+```bash
+cd /opt
+sudo git clone https://github.com/dn9uy3n/bbot-osint-mcp.git
+cd bbot-osint-mcp
+chmod +x scripts/quick-install.sh
+./scripts/quick-install.sh
+```
+
+What it does:
+- Ensures Docker daemon has reliable DNS (1.1.1.1, 8.8.8.8)
+- Creates runtime dirs: logs, cache, scans, secrets
+- Generates secrets if missing
+- Builds and starts the stack
+
 ### Requirements
 
 - VPS running Ubuntu 22.04 or 24.04
@@ -819,6 +835,16 @@ Script provides 3 options:
 ---
 
 ## Troubleshooting
+
+### 1. DNS inside containers fails (Temporary failure in name resolution)
+
+Fix:
+1) Use Quick Install to set daemon DNS and restart Docker.
+2) Verify inside container:
+```bash
+sudo docker exec bbot_osint getent hosts publicsuffix.org raw.githubusercontent.com
+```
+3) If still failing, use different DNS (9.9.9.9, 208.67.222.222) in `/etc/docker/daemon.json` and restart Docker.
 
 See detailed guide: **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
