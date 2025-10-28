@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     zip \
     sudo \
-    openjdk-17-jre-headless \
+    default-jre-headless \
   && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js (for retirejs and related tools)
