@@ -33,6 +33,9 @@ services:
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
+    ports:
+      - "127.0.0.1:7474:7474" # HTTP UI (bind to localhost only)
+      - "127.0.0.1:7687:7687" # Bolt driver (bind to localhost only)
     networks:
       - internal
     dns:
