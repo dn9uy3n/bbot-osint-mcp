@@ -31,6 +31,18 @@ async def mcp_query(domain: str | None = None, host: str | None = None, online_o
     return {"results": rows}
 
 
+@mcp_app.get("/tools")
+async def mcp_tools_index() -> dict[str, Any]:
+    """List available MCP-like tools (query-only)."""
+    return {
+        "tools": [
+            {"name": "osint.status", "method": "GET", "path": "/mcp/tools/osint.status"},
+            {"name": "osint.query", "method": "GET", "path": "/mcp/tools/osint.query?domain=<domain>&online_only=true&limit=50"},
+            {"name": "osint.events.query", "method": "GET", "path": "/mcp/tools/osint.events.query?types=DNS_NAME&domain=<domain>&limit=100"},
+        ]
+    }
+
+
 @mcp_app.get("/tools/osint.events.query")
 async def mcp_events_query(
     types: list[str] | None = None, 
