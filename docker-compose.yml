@@ -70,9 +70,15 @@ services:
     command: ["uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     networks:
       - internal
+      - public
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    dns_search: []
+    dns_opt:
+      - use-vc
+      - attempts:2
+      - timeout:2
     tmpfs:
       - /tmp
     security_opt:
