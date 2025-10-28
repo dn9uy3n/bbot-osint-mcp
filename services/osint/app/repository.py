@@ -247,7 +247,7 @@ def cleanup_graph(now_epoch: int) -> dict:
     # Remove orphaned nodes (no relationships)
     if settings.orphan_cleanup_enabled:
         for _ in neo4j_client.run(
-            "MATCH (n) WHERE size((n)--()) = 0 WITH n LIMIT 10000 DETACH DELETE n RETURN 1"
+            "MATCH (n) WHERE NOT (n)--() WITH n LIMIT 10000 DETACH DELETE n RETURN 1"
         ):
             stats["deleted_orphans"] += 1
 
