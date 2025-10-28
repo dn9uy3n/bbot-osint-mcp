@@ -54,8 +54,8 @@ services:
     env_file:
       - .env
     volumes:
-      # Mount host bbot config (API keys) into the expected location for BBOT
-      - ${BBOT_CONFIG_HOST_PATH:-./config/bbot.yml}:/root/.config/bbot/bbot.yml:ro
+      # Mount host BBOT config directory (must contain bbot.yml)
+      - ${BBOT_CONFIG_DIR_HOST_PATH:-./config}:/root/.config/bbot:ro
       # Mount init_config.json from project root
       - ./init_config.json:/app/init_config.json:ro
       # Mount logs directory for BBOT and app logs
