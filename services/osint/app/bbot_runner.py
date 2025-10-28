@@ -1,6 +1,16 @@
 from typing import AsyncIterator, Iterator
 from bbot.scanner import Scanner
 from .models import ScanRequest
+from loguru import logger
+
+ALLOWED_PRESETS = {
+    # Common presets known to be available in BBOT
+    "subdomain-enum",
+    "spider",
+    "email-enum",
+    "web-basic",
+    "cloud-enum",
+}
 
 
 def build_scanner(req: ScanRequest) -> Scanner:
@@ -12,10 +22,19 @@ def build_scanner(req: ScanRequest) -> Scanner:
             "spider_links_per_page": req.spider_links_per_page,
         },
     }
+    # Sanitize presets: drop unknown, default to subdomain-enum if empty
+    presets = [p for p in (req.presets or []) if p in ALLOWED_PRESETS]
+    if not presets:
+        if req.presets:
+            logger.warning(
+                f"Invalid presets {req.presets}; defaulting to ['subdomain-enum']"
+            )
+        presets = ["subdomain-enum"]
+
     flags = req.flags.copy()
     if req.allow_deadly:
         flags.append("allow-deadly")
-    return Scanner(*req.targets, presets=req.presets, flags=flags, config=config)
+    return Scanner(*req.targets, presets=presets, flags=flags, config=config)
 
 
 def start_scan(req: ScanRequest) -> Iterator[dict]:

@@ -295,7 +295,7 @@ nano init_config.json
 
 **Detailed Explanation:**
 
-1. **targets**: Default target domain list. When calling `/scan` API without passing `targets`, this list will be used.
+1. **targets**: Default target domain list used by the continuous scanner.
 
 2. **bbot_modules**: API keys for BBOT modules:
    - `securitytrails`: Find subdomains via SecurityTrails
@@ -394,23 +394,9 @@ curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
 # Result: {"status":"ok"}
 ```
 
-### Step 9: Run First Scan
+### Step 9: Scans run automatically
 
-```bash
-curl -X POST "https://osint.example.com/scan" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{
-    "targets": ["example.com"],
-    "presets": ["subdomain-enum"],
-    "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "sleep_after_scan_seconds": 60
-  }'
-```
+There is no manual scan endpoint. The scanner reads `init_config.json` and runs cycles continuously.
 
 **Telegram notification**: If configured, you'll receive a message when scan completes.
 
@@ -480,31 +466,7 @@ Scan 2 (day 35):
 curl -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
 ```
 
-**2. Scan (with all parameters)**
-
-```bash
-curl -X POST "https://osint.example.com/scan" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Token: $API_TOKEN" \
-  -d '{
-    "targets": ["evilcorp.com"],
-    "presets": ["subdomain-enum"],
-    "flags": [],
-    "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "sleep_after_scan_seconds": 120
-  }'
-```
-
-**Parameter Explanation:**
-- `targets`: List of domains to scan
-- `presets`: BBOT presets (`subdomain-enum`, `spider`, `web-basic`, etc.)
-- `max_workers`: Number of concurrent threads (recommended 2-3)
-- `spider_depth`, `spider_distance`, `spider_links_per_page`: Web crawling limits
-- `sleep_after_scan_seconds`: Sleep after scan (avoid blocking with continuous scans)
+Removed. Continuous scanning only; configure via `scan_defaults`.
 
 **3. Query Hosts**
 
@@ -583,11 +545,10 @@ In Cursor:
 
 ### Step 3: Use Tools
 
-You'll see 3 tools:
+You'll see 2 tools:
 
 1. **osint.query**: Query hosts from Neo4j
-2. **osint.scan**: Trigger BBOT scan
-3. **osint.events.query**: Query detailed events
+2. **osint.events.query**: Query detailed events
 
 **Example in Cursor chat:**
 
@@ -597,9 +558,7 @@ Call MCP tool: osint.query {"domain":"evilcorp.com","online_only":true}
 
 or
 
-```
-Call MCP tool: osint.scan {"targets":["evilcorp.com"],"presets":["subdomain-enum"]}
-```
+Presets: supported values are `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`. Invalid presets will be ignored and default to `subdomain-enum`.
 
 ---
 

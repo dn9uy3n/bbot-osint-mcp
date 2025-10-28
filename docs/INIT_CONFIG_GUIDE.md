@@ -443,7 +443,7 @@ BBOT có các preset được định nghĩa sẵn:
 | `web-basic` | Web recon cơ bản | httpx, wappalyzer, robots |
 | `email-enum` | Tìm emails | hunter, dehashed |
 | `cloud-enum` | Cloud assets | azure, aws modules |
-| `aggressive` | Scan đầy đủ | Tất cả modules |
+| ~~`aggressive`~~ | (không còn hỗ trợ) | Sử dụng kết hợp nhiều preset thay thế |
 
 **Multiple presets:**
 ```json
@@ -452,7 +452,7 @@ BBOT có các preset được định nghĩa sẵn:
 }
 ```
 
-**⚠️ Lưu ý:** `aggressive` rất mạnh nhưng dễ bị block!
+**⚠️ Lưu ý:** `aggressive` không còn khả dụng. Nếu cần mạnh hơn, hãy dùng nhiều preset cùng lúc: `["subdomain-enum", "spider", "email-enum"]`.
 
 #### 2. flags (tùy chọn nâng cao)
 

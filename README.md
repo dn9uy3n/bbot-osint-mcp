@@ -295,7 +295,7 @@ nano init_config.json
 
 **Giải thích chi tiết:**
 
-1. **targets**: Danh sách domain mục tiêu mặc định. Khi gọi API `/scan` mà không truyền `targets`, sẽ dùng danh sách này.
+1. **targets**: Danh sách domain mục tiêu mặc định cho scanner tự động.
 
 2. **bbot_modules**: API keys cho các module BBOT:
    - `securitytrails`: Tìm subdomain qua SecurityTrails
