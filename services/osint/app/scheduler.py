@@ -2,7 +2,7 @@ import asyncio
 from typing import List
 import time
 from .config import settings
-from .bbot_runner import async_start_scan
+from .bbot_runner import async_start_scan, _event_to_dict
 from .models import ScanRequest
 from .repository import ingest_event, cleanup_graph
 from .notifications import notify_telegram
@@ -66,7 +66,7 @@ class ContinuousScanner:
                     # Run scan
                     event_count = 0
                     async for event in async_start_scan(req):
-                        ingest_event(event, default_domain=target)
+                        ingest_event(_event_to_dict(event), default_domain=target)
                         event_count += 1
                     
                     total_events += event_count
