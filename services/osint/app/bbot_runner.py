@@ -12,6 +12,12 @@ ALLOWED_PRESETS = {
     "cloud-enum",
 }
 
+ALLOWED_FLAGS = {
+    # Subset of BBOT runtime flags we allow to pass through
+    "safe",
+    "active",
+}
+
 
 def build_scanner(req: ScanRequest) -> Scanner:
     config = {
@@ -31,10 +37,8 @@ def build_scanner(req: ScanRequest) -> Scanner:
             )
         presets = ["subdomain-enum"]
 
-    flags = req.flags.copy()
-    # Always prevent runtime dependency installation inside container
-    if "no-install-deps" not in flags:
-        flags.append("no-install-deps")
+    # Sanitize flags: drop unknown ones (e.g., presets mistakenly set as flags)
+    flags = [f for f in (req.flags or []) if f in ALLOWED_FLAGS]
     if req.allow_deadly:
         flags.append("allow-deadly")
     return Scanner(*req.targets, presets=presets, flags=flags, config=config)
