@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from ..app.models import QueryRequest, EventsQueryRequest
-from ..app.repository import query_subdomains, query_events
-from ..app.config import settings
+from app.models import QueryRequest, EventsQueryRequest
+from app.repository import query_subdomains, query_events
+from app.config import settings
 from typing import Any
 
 
@@ -58,7 +58,7 @@ async def mcp_events_query(
 @mcp_app.get("/tools/osint.status")
 async def mcp_status() -> dict[str, Any]:
     """Get scanner status and configuration"""
-    from ..app.scheduler import scanner
+    from app.scheduler import scanner
     return {
         "scanner_running": scanner.running,
         "targets": settings.default_targets,
