@@ -15,8 +15,9 @@ gen_hex() {
 }
 
 gen_pass() {
-  # Base64, 32 bytes (~43 chars), remove possibly problematic chars for copy/paste
-  openssl rand -base64 32 | tr -d '\n'
+  # Hex password (no special chars like / + = that cause issues with Neo4j AUTH)
+  # 32 bytes = 64 hex chars
+  openssl rand -hex 32
 }
 
 if [ ! -s "$API_TOKEN_FILE" ]; then
