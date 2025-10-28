@@ -1,25 +1,96 @@
 {
+  "_comment": "BBOT OSINT MCP - Init Configuration",
+  "_docs": "See docs/INIT_CONFIG_GUIDE.md for detailed documentation",
+  
   "targets": [
-    "evilcorp.com",
-    "target2.com"
+    "example.com",
+    "client1.com",
+    "client2.net"
   ],
+  
   "bbot_modules": {
-    "securitytrails": { "api_key": "CHANGE_ME" },
-    "shodan_dns": { "api_key": "CHANGE_ME" },
-    "virustotal": { "api_key": "CHANGE_ME" },
-    "c99": { "api_key": ["CHANGE_ME"] }
+    "_comment_virustotal": "Free tier: 500 req/day - https://www.virustotal.com/gui/join-us",
+    "virustotal": {
+      "api_key": "YOUR_VIRUSTOTAL_API_KEY"
+    },
+    
+    "_comment_shodan": "Free tier: 100 req/month - https://account.shodan.io/register",
+    "shodan_dns": {
+      "api_key": "YOUR_SHODAN_API_KEY"
+    },
+    
+    "_comment_securitytrails": "Free tier: 50 req/month - https://securitytrails.com/app/signup",
+    "securitytrails": {
+      "api_key": "YOUR_SECURITYTRAILS_API_KEY"
+    },
+    
+    "_comment_hunter": "Free tier: 25 req/month - https://hunter.io/users/sign_up",
+    "hunter": {
+      "api_key": "YOUR_HUNTER_API_KEY"
+    },
+    
+    "_comment_github": "Free - https://github.com/settings/tokens",
+    "github": {
+      "api_key": "ghp_YOUR_GITHUB_TOKEN"
+    },
+    
+    "_comment_censys": "Free tier: 250 req/month - https://search.censys.io/register",
+    "censys": {
+      "api_id": "YOUR_CENSYS_API_ID",
+      "api_secret": "YOUR_CENSYS_API_SECRET"
+    },
+    
+    "_comment_bevigil": "Free - https://bevigil.com/osint-api",
+    "bevigil": {
+      "api_key": "YOUR_BEVIGIL_API_KEY"
+    },
+    
+    "_comment_fullhunt": "Free tier - https://fullhunt.io/signup",
+    "fullhunt": {
+      "api_key": "YOUR_FULLHUNT_API_KEY"
+    },
+    
+    "_comment_c99": "Paid - https://api.c99.nl/ - Supports multiple keys for rotation",
+    "c99": {
+      "api_key": [
+        "YOUR_C99_KEY_1",
+        "YOUR_C99_KEY_2"
+      ]
+    }
   },
-  "TELEGRAM_BOT_TOKEN": "",
-  "TELEGRAM_CHAT_ID": "",
+  
+  "_comment_telegram": "Get bot token from @BotFather, chat_id from @userinfobot",
+  "TELEGRAM_BOT_TOKEN": "123456789:ABCdefGHIjklMNOpqrsTUVwxyz",
+  "TELEGRAM_CHAT_ID": "987654321",
+  
   "scan_defaults": {
-    "presets": ["subdomain-enum"],
+    "_comment_presets": "subdomain-enum, spider, email-enum, web-basic, cloud-enum",
+    "presets": [
+      "subdomain-enum",
+      "email-enum"
+    ],
+    
     "flags": [],
+    
+    "_comment_max_workers": "1-2 for production, 3-5 for testing (higher = faster but more risk)",
     "max_workers": 2,
+    
+    "_comment_spider_depth": "0=no crawl, 1=homepage, 2=normal, 3=deep (recommended: 2)",
     "spider_depth": 2,
+    
+    "_comment_spider_distance": "0=only target, 1=target+subdomains (recommended: 1)",
     "spider_distance": 1,
+    
+    "_comment_spider_links": "Links to follow per page (recommended: 10)",
     "spider_links_per_page": 10,
+    
+    "_comment_deadly": "false=passive only (safe), true=active scan (dangerous!)",
     "allow_deadly": false,
+    
+    "_comment_target_sleep": "Seconds to sleep between each target (300=5min recommended)",
     "target_sleep_seconds": 300,
+    
+    "_comment_cycle_sleep": "Seconds to sleep after full cycle (3600=1h, 7200=2h, 86400=24h)",
     "cycle_sleep_seconds": 3600
   }
 }

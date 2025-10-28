@@ -8,13 +8,14 @@ Continuous OSINT monitoring system based on BBOT with FastAPI, Neo4j for full da
 
 **Documentation:**
 - [GitHub BBOT](https://github.com/blacklanternsecurity/bbot)
+- **[📝 init_config.json Configuration Guide](docs/INIT_CONFIG_GUIDE.md)** ⭐
 - [Detailed Installation Guide](docs/INSTALLATION.md)
 - [API Usage Guide](docs/API_USAGE.md)
 - [Cursor MCP Integration](docs/MCP_INTEGRATION.md)
 - [Neo4j Data Model](docs/NEO4J_MODEL.md)
 - [Sleep Parameters Explained](SLEEP_PARAMETERS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Uninstall Guide](docs/UNINSTALL.md)
+- [Management & Uninstall Guide](docs/UNINSTALL.md)
 
 ### Project Description
 
