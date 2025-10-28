@@ -32,7 +32,7 @@ def apply_init_config():
     if isinstance(scan_defaults, dict):
         settings.scan_defaults = scan_defaults
     
-    # BBOT API keys: write into mounted bbot.yml if provided via init config
+    # BBOT API keys: write to /root/.config/bbot/bbot.yml from init_config.json
     bbot_modules = cfg.get("bbot_modules")
     if isinstance(bbot_modules, dict):
         # Merge into existing file path (mounted path). We avoid write if no mount.
