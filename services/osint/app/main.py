@@ -6,8 +6,7 @@ from .repository import query_subdomains, ensure_constraints, query_events
 from .config import settings
 from .config_loader import apply_init_config
 from .scheduler import scanner
-# TODO: Re-enable MCP after fixing mcp package compatibility
-# from mcp_server.server import get_app as get_mcp_app
+from mcp_server.server import get_app as get_mcp_app
 
 app = FastAPI(title="BBOT OSINT Monitoring API", default_response_class=ORJSONResponse)
 
@@ -47,10 +46,9 @@ def events_query(req: EventsQueryRequest):
     return {"results": rows, "count": len(rows)}
 
 
-# Mount MCP server (query-only, no scan triggers)
-# TODO: Re-enable MCP after fixing mcp package compatibility
-# mcp_app = get_mcp_app()
-# app.mount("/mcp", mcp_app)
+# Mount MCP shim app (query-only)
+mcp_app = get_mcp_app()
+app.mount("/mcp", mcp_app)
 
 
 @app.on_event("startup")

@@ -1,5 +1,4 @@
-from mcp.server.fastapi import MCPFAPIApp
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from ..app.models import QueryRequest, EventsQueryRequest
 from ..app.repository import query_subdomains, query_events
@@ -7,7 +6,11 @@ from ..app.config import settings
 from typing import Any
 
 
-mcp_app = MCPFAPIApp()
+"""
+Temporary shim FastAPI app under /mcp to provide query-only MCP-like tools.
+This avoids importing the external mcp SDK until compatibility is resolved.
+"""
+mcp_app = FastAPI()
 
 
 # Enforce token via middleware
@@ -20,7 +23,7 @@ async def token_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-@mcp_app.tool("osint.query")
+@mcp_app.get("/tools/osint.query")
 async def mcp_query(domain: str | None = None, host: str | None = None, online_only: bool = False, limit: int = 50) -> dict[str, Any]:
     """Query hosts from Neo4j database"""
     req = QueryRequest(domain=domain, host=host, online_only=online_only, limit=limit)
@@ -28,7 +31,7 @@ async def mcp_query(domain: str | None = None, host: str | None = None, online_o
     return {"results": rows}
 
 
-@mcp_app.tool("osint.events.query")
+@mcp_app.get("/tools/osint.events.query")
 async def mcp_events_query(
     types: list[str] | None = None, 
     modules: list[str] | None = None, 
@@ -52,7 +55,7 @@ async def mcp_events_query(
     return {"results": rows}
 
 
-@mcp_app.tool("osint.status")
+@mcp_app.get("/tools/osint.status")
 async def mcp_status() -> dict[str, Any]:
     """Get scanner status and configuration"""
     from ..app.scheduler import scanner
@@ -65,4 +68,4 @@ async def mcp_status() -> dict[str, Any]:
 
 
 def get_app():
-    return mcp_app.app
+    return mcp_app

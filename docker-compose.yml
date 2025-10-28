@@ -35,6 +35,11 @@ services:
       - neo4j_logs:/logs
     networks:
       - internal
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $NEO4J_PASSWORD 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   osint:
     build:
@@ -42,7 +47,8 @@ services:
       dockerfile: Dockerfile
     container_name: bbot_osint
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     restart: unless-stopped
     env_file:
       - .env
