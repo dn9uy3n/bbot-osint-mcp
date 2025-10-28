@@ -6,26 +6,11 @@
   encode gzip
   tls {$LE_EMAIL}
 
-  # Increase timeouts for long scans
-  timeouts {
-    read_body 300s
-    read_header 30s
-    write 300s
-    idle 300s
-  }
-
   reverse_proxy bbot_osint:8000 {
     header_up X-Forwarded-Proto {scheme}
     header_up Host {host}
     header_up X-Real-IP {remote}
     header_up X-Forwarded-For {remote}
-    
-    # Transport timeouts
-    transport http {
-      read_timeout 300s
-      write_timeout 300s
-      dial_timeout 30s
-    }
   }
 }
 
