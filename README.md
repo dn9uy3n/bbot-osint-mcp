@@ -31,6 +31,7 @@ Hệ thống **continuous monitoring** tự động quét targets theo chu kỳ,
 - **Full Data Fidelity**: Lưu đầy đủ dữ liệu BBOT vào Neo4j (DNS_NAME, OPEN_TCP_PORT, TECHNOLOGY, Event raw data).
 - **Incremental Updates**: Các lần quét sau chỉ cập nhật/thêm mới, không xóa dữ liệu cũ (trừ cleanup theo retention policy).
 - **MCP Query Interface**: Cursor có thể kết nối qua MCP để query dữ liệu (`osint.query`, `osint.events.query`, `osint.status`).
+  - Đường dẫn shim hiện tại: `/mcp/tools/osint.query`, `/mcp/tools/osint.events.query`, `/mcp/tools/osint.status`.
 - **REST API**: Query hosts và events qua HTTP API.
 - **Automatic Cleanup**: Xóa events quá hạn, hosts offline lâu, và orphan nodes sau mỗi chu kỳ.
 - **Telegram Notifications**: Thông báo sau mỗi chu kỳ quét hoàn thành.
@@ -357,7 +358,13 @@ nano init_config.json
 - Flag hỗ trợ: `safe`, `active`.
 - Preset không hợp lệ sẽ bị bỏ qua và mặc định `subdomain-enum`.
 - Flag không hợp lệ sẽ bị loại bỏ tự động.
-- Cài đặt phụ thuộc (deps) runtime bị vô hiệu hóa trong container; module yêu cầu root sẽ bị bỏ qua.
+- Image đã cài sẵn Node.js/JRE/openssl và một số Python deps phổ biến để hỗ trợ modules nặng; container chạy root để cho phép cài deps bổ sung khi cần.
+
+#### Vô hiệu hóa module từ init_config.json
+Có thể tắt các module không cần (ví dụ gowitness trên server không cần screenshot):
+```json
+"bbot_disable_modules": ["gowitness"]
+```
 
 ### Bước 6: Kiểm tra DNS và Firewall
 

@@ -373,6 +373,13 @@ nano init_config.json
 - Any invalid preset will be ignored and default to `subdomain-enum`.
 - Any invalid flag (e.g., mistakenly adding a preset into flags) will be dropped automatically.
 - Runtime dependency installs are disabled in container; modules requiring root installs will be skipped.
+  - If you need heavy modules (retirejs, trufflehog, fingerprintx, sslcert, gowitness), the image now preinstalls Node.js, JRE, openssl, and common Python deps. Remaining missing deps will be installed at runtime (container runs as root).
+
+#### Disable Modules from init_config.json
+You can disable modules you don't need (e.g., gowitness on servers without headless browser):
+```json
+"bbot_disable_modules": ["gowitness"]
+```
 
 ### Step 6: Verify DNS and Firewall
 
