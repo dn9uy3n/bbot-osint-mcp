@@ -32,6 +32,9 @@ def build_scanner(req: ScanRequest) -> Scanner:
         presets = ["subdomain-enum"]
 
     flags = req.flags.copy()
+    # Always prevent runtime dependency installation inside container
+    if "no-install-deps" not in flags:
+        flags.append("no-install-deps")
     if req.allow_deadly:
         flags.append("allow-deadly")
     return Scanner(*req.targets, presets=presets, flags=flags, config=config)
