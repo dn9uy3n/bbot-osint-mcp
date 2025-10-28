@@ -1,23 +1,31 @@
 {
   email {$LE_EMAIL}
-  # Optional: increase timeouts for long scans
-  servers {
-    read_timeout 300s
-    write_timeout 300s
-    idle_timeout 300s
-  }
 }
 
 {$LE_DOMAIN} {
   encode gzip
   tls {$LE_EMAIL}
 
-  @api path_regexp api ^/
+  # Increase timeouts for long scans
+  timeouts {
+    read_body 300s
+    read_header 30s
+    write 300s
+    idle 300s
+  }
+
   reverse_proxy bbot_osint:8000 {
     header_up X-Forwarded-Proto {scheme}
     header_up Host {host}
     header_up X-Real-IP {remote}
     header_up X-Forwarded-For {remote}
+    
+    # Transport timeouts
+    transport http {
+      read_timeout 300s
+      write_timeout 300s
+      dial_timeout 30s
+    }
   }
 }
 
