@@ -54,7 +54,11 @@ app.mount("/mcp", mcp_app)
 @app.on_event("startup")
 async def _on_startup():
     apply_init_config()
-    ensure_constraints()
+    # Ensure constraints, but don't crash if DB not ready yet
+    try:
+        ensure_constraints()
+    except Exception:
+        pass
     # Start continuous scanner in background
     import asyncio
     asyncio.create_task(scanner.run_forever())
