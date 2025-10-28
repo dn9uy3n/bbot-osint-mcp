@@ -598,7 +598,7 @@ curl -X POST "https://osint.example.com/events/query" \
   "mcpServers": {
     "bbot-osint": {
       "type": "http",
-      "url": "https://osint.example.com/mcp",
+      "url": "http://osint.example.com/mcp",
       "headers": {
         "X-API-Token": "YOUR_API_TOKEN_FROM_SECRETS"
       }
