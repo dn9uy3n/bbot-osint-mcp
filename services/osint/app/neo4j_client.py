@@ -7,23 +7,31 @@ from neo4j.exceptions import ServiceUnavailable
 
 class Neo4jClient:
     def __init__(self) -> None:
-        uri = f"{settings.neo4j_scheme}://{settings.neo4j_host}:{settings.neo4j_port}"
-        # Retry connect to allow containerized Neo4j to come up
+        # Try multiple hostnames in case Docker DNS not ready yet
+        candidate_hosts = [
+            str(settings.neo4j_host or "neo4j"),
+            "neo4j",
+            "bbot_neo4j",
+        ]
+        auth = (settings.neo4j_username, settings.neo4j_password)
         last_exc: Exception | None = None
-        for _ in range(60):  # up to ~60s
-            try:
-                self._driver: Driver = GraphDatabase.driver(
-                    uri, auth=(settings.neo4j_username, settings.neo4j_password)
-                )
-                # perform a lightweight check
-                with self._driver.session() as session:
-                    session.run("RETURN 1").consume()
-                last_exc = None
+        connected = False
+        for host in candidate_hosts:
+            uri = f"{settings.neo4j_scheme}://{host}:{settings.neo4j_port}"
+            for _ in range(120):  # up to ~120s
+                try:
+                    self._driver: Driver = GraphDatabase.driver(uri, auth=auth)
+                    with self._driver.session() as session:
+                        session.run("RETURN 1").consume()
+                    connected = True
+                    last_exc = None
+                    break
+                except (ServiceUnavailable, Exception) as exc:
+                    last_exc = exc
+                    time.sleep(1)
+            if connected:
                 break
-            except ServiceUnavailable as exc:
-                last_exc = exc
-                time.sleep(1)
-        if last_exc:
+        if not connected and last_exc:
             raise last_exc
 
     def close(self) -> None:
