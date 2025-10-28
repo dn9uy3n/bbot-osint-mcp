@@ -23,7 +23,11 @@ COPY mcp_server /app/mcp_server
 RUN echo '{"targets":[],"bbot_modules":{},"TELEGRAM_BOT_TOKEN":"","TELEGRAM_CHAT_ID":"","scan_defaults":{"presets":["subdomain-enum"],"flags":[],"max_workers":2,"spider_depth":2,"spider_distance":1,"spider_links_per_page":10,"allow_deadly":false,"target_sleep_seconds":300,"cycle_sleep_seconds":3600}}' > /app/init_config.json.default
 
 # Non-root user (optional)
-RUN useradd -ms /bin/bash appuser
+RUN useradd -ms /bin/bash appuser \
+  && mkdir -p /home/appuser/.bbot/logs \
+  && mkdir -p /home/appuser/.bbot/cache \
+  && mkdir -p /home/appuser/.bbot/scans \
+  && chown -R appuser:appuser /home/appuser/.bbot
 USER appuser
 
 EXPOSE 8000

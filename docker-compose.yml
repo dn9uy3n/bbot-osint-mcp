@@ -60,6 +60,8 @@ services:
       # Mount logs directory for BBOT and app logs
       - ./logs:/home/appuser/.bbot/logs
       - ./logs:/app/logs
+      # Mount cache directory to ensure write access
+      - ./cache:/home/appuser/.bbot/cache
     command: ["uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     networks:
       - internal
