@@ -1,4 +1,5 @@
 from typing import Iterable, Any
+import json
 from .neo4j_client import neo4j_client
 from .models import SubdomainRecord
 from .config import settings
@@ -70,7 +71,8 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "module": emodule,
         "ts": int(ts) if ts else 0,
         "evid": evid,
-        "raw": event,
+        # Store event payload as JSON string to satisfy Neo4j property types
+        "raw": json.dumps(event, ensure_ascii=False, default=str),
         "host": data.get("host") or data.get("name") or data.get("fqdn"),
         "domain": data.get("domain") or default_domain,
         "ip": data.get("ip") or data.get("addr"),
