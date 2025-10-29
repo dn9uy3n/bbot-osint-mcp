@@ -1,5 +1,7 @@
 from typing import Iterable, Any
 import json
+import os
+from pathlib import Path
 from .neo4j_client import neo4j_client
 from .models import SubdomainRecord
 from .config import settings
@@ -381,4 +383,144 @@ def cleanup_graph(now_epoch: int) -> dict:
 
     return stats
 
+
+
+# --- BBOT scan directory importer (post-scan detailed results) ---
+
+def _record_to_event_like(record: Any) -> dict | None:
+    """Best-effort conversion of a BBOT record into our event shape.
+    Returns None if the record cannot be interpreted.
+    """
+    try:
+        if not isinstance(record, dict):
+            return None
+        # If it already looks like an event
+        if record.get("type") and (isinstance(record.get("data"), dict) or record.get("data") is None):
+            # Ensure data is dict
+            data = record.get("data") or {}
+            return {"type": record.get("type"), "module": record.get("module"), "ts": record.get("ts"), "id": record.get("id"), "data": data}
+
+        # Common artifact patterns: flatten into event-like structure
+        candidate: dict[str, Any] = {}
+        data: dict[str, Any] = {}
+
+        # Infer type from keys
+        if "fqdn" in record or "host" in record or "name" in record:
+            # DNS/Host-like
+            t = "DNS_NAME" if "name" in record or "fqdn" in record else "HOST"
+            data.update(record)
+            candidate = {"type": t, "data": data}
+        elif "ip" in record or "addr" in record:
+            data.update(record)
+            candidate = {"type": "IP_ADDRESS", "data": data}
+        elif "url" in record or (record.get("value") and isinstance(record.get("value"), str) and record.get("value").startswith("http")):
+            data.update(record)
+            candidate = {"type": "URL", "data": data}
+        elif "email" in record:
+            data.update(record)
+            candidate = {"type": "EMAIL_ADDRESS", "data": data}
+        elif "port" in record and ("host" in record or "fqdn" in record):
+            data.update(record)
+            candidate = {"type": "OPEN_TCP_PORT", "data": data}
+        elif "technology" in record or (record.get("type") == "technology"):
+            data.update(record)
+            tech_name = record.get("technology") or record.get("name")
+            if tech_name:
+                data["technology"] = tech_name
+            candidate = {"type": "TECHNOLOGY", "data": data}
+        elif "asn" in record or record.get("type") == "ASN":
+            data.update(record)
+            candidate = {"type": "ASN", "data": data}
+        elif record.get("severity") and record.get("id"):
+            # Likely a finding
+            data.update(record)
+            candidate = {"type": "FINDING", "data": data}
+        else:
+            return None
+
+        # Pass through module/ts/id if present
+        for k in ("module", "ts", "id"):
+            if k in record:
+                candidate[k] = record[k]
+        return candidate
+    except Exception:
+        return None
+
+
+def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
+    """Import events/artifacts from a BBOT scan directory.
+    Returns number of records ingested.
+    """
+    base = Path(scan_dir)
+    if not base.is_dir():
+        return 0
+    ingested = 0
+    # Candidate files to parse
+    candidates = [
+        "events.jsonl",
+        "events.json",
+        "artifacts.jsonl",
+        "artifacts.json",
+        "results.json",
+        "scan.json",
+        "graph.json",
+    ]
+    for name in candidates:
+        p = base / name
+        if not p.exists():
+            continue
+        try:
+            if p.suffix == ".jsonl":
+                with p.open("r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        ev = _record_to_event_like(rec)
+                        if ev:
+                            ingest_event(ev, default_domain=default_domain)
+                            ingested += 1
+            else:
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                items: list[Any] = []
+                if isinstance(obj, list):
+                    items = obj
+                elif isinstance(obj, dict):
+                    for key in ("events", "artifacts", "results", "items", "data"):
+                        if isinstance(obj.get(key), list):
+                            items = obj[key]
+                            break
+                    if not items:
+                        # Sometimes single record
+                        items = [obj]
+                for rec in items:
+                    ev = _record_to_event_like(rec)
+                    if ev:
+                        ingest_event(ev, default_domain=default_domain)
+                        ingested += 1
+        except Exception:
+            # Ignore file-level errors, proceed to next
+            continue
+    return ingested
+
+
+def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2) -> int:
+    """Find the most recent BBOT scan directories and ingest from them.
+    Returns total records ingested.
+    """
+    # Default BBOT scans location inside container
+    scans_root = os.path.expanduser("~/.bbot/scans")
+    root = Path(scans_root)
+    if not root.exists():
+        return 0
+    dirs = [d for d in root.iterdir() if d.is_dir()]
+    dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    total = 0
+    for d in dirs[:max_dirs]:
+        total += ingest_scan_dir(str(d), default_domain=default_domain)
+    return total
 
