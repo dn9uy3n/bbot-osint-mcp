@@ -13,7 +13,8 @@ def upsert_subdomain(record: SubdomainRecord) -> None:
         "    h.sources = $sources, "
         "    h.ports = $ports"
     )
-    neo4j_client.run(query, record.model_dump())
+    # Ensure the write executes by consuming the generator
+    list(neo4j_client.run(query, record.model_dump()))
 
 
 def query_subdomains(domain: str | None = None, host: str | None = None, online_only: bool = False, limit: int = 100) -> Iterable[dict]:
@@ -170,7 +171,8 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "MERGE (h)-[:PART_OF]->(d)",
     ]
 
-    neo4j_client.run("\n".join(cypher), params)
+    # Ensure the write executes by consuming the generator
+    list(neo4j_client.run("\n".join(cypher), params))
 
 
 def query_events(
