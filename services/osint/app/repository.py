@@ -76,8 +76,15 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     evid = event.get("id") or f"{etype}:{emodule}:{ts}:{hash(str(event))}"
     data = event.get("data") or {}
 
+    # Normalize raw data payload into a dict
+    raw_data = event.get("data")
+    if isinstance(raw_data, dict):
+        data = raw_data
+    else:
+        data = {"value": raw_data} if raw_data is not None else {}
+
     # Common normalized values
-    value = (event.get("data") or {}).get("value")
+    value = data.get("value") if isinstance(data, dict) else (raw_data if isinstance(raw_data, str) else None)
 
     params: dict[str, Any] = {
         "etype": etype,
@@ -527,23 +534,42 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
                             ingest_event(ev, default_domain=default_domain)
                             ingested += 1
             else:
-                obj = json.loads(p.read_text(encoding="utf-8"))
-                items: list[Any] = []
-                if isinstance(obj, list):
-                    items = obj
-                elif isinstance(obj, dict):
-                    for key in ("events", "artifacts", "results", "items", "data"):
-                        if isinstance(obj.get(key), list):
-                            items = obj[key]
-                            break
-                    if not items:
-                        # Sometimes single record
-                        items = [obj]
-                for rec in items:
-                    ev = _record_to_event_like(rec)
-                    if ev:
-                        ingest_event(ev, default_domain=default_domain)
-                        ingested += 1
+                txt = p.read_text(encoding="utf-8", errors="ignore")
+                parsed_bulk = False
+                try:
+                    obj = json.loads(txt)
+                    parsed_bulk = True
+                    items: list[Any] = []
+                    if isinstance(obj, list):
+                        items = obj
+                    elif isinstance(obj, dict):
+                        for key in ("events", "artifacts", "results", "items", "data"):
+                            if isinstance(obj.get(key), list):
+                                items = obj[key]
+                                break
+                        if not items:
+                            items = [obj]
+                    for rec in items:
+                        ev = _record_to_event_like(rec)
+                        if ev:
+                            ingest_event(ev, default_domain=default_domain)
+                            ingested += 1
+                except Exception:
+                    pass
+                # Fallback: treat as JSON lines stream
+                if not parsed_bulk:
+                    for line in txt.splitlines():
+                        line = line.strip()
+                        if not line or not line.startswith("{"):
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        ev = _record_to_event_like(rec)
+                        if ev:
+                            ingest_event(ev, default_domain=default_domain)
+                            ingested += 1
         except Exception:
             # Ignore file-level errors, proceed to next
             continue
