@@ -2,6 +2,7 @@ from typing import Iterable, Any
 import json
 import os
 from pathlib import Path
+import csv
 from .neo4j_client import neo4j_client
 from .models import SubdomainRecord
 from .config import settings
@@ -466,6 +467,7 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
         "graph.json",
         # Common BBOT consolidated output
         "output.json",
+        "output.csv",
         # Simple text artifacts
         "subdomains.txt",
         "emails.txt",
@@ -487,6 +489,29 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
                             ev = {"type": "EMAIL_ADDRESS", "data": {"email": val, "value": val}}
                         ingest_event(ev, default_domain=default_domain)
                         ingested += 1
+            elif p.name == "output.csv":
+                with p.open("r", encoding="utf-8", errors="ignore") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        if not isinstance(row, dict):
+                            continue
+                        # Normalize row to event-like
+                        etype = row.get("type") or row.get("Type") or "UNKNOWN"
+                        data: dict[str, Any] = {}
+                        # Pass through common fields if exist
+                        for k in ("value","url","host","fqdn","domain","ip","addr","email","port","name","technology"):
+                            if row.get(k):
+                                data[k] = row[k]
+                        ev = _record_to_event_like({
+                            "type": etype,
+                            "data": data,
+                            "module": row.get("module") or row.get("Module"),
+                            "ts": row.get("ts") or row.get("Timestamp"),
+                            "id": row.get("id") or row.get("ID"),
+                        })
+                        if ev:
+                            ingest_event(ev, default_domain=default_domain)
+                            ingested += 1
             elif p.suffix == ".jsonl":
                 with p.open("r", encoding="utf-8") as f:
                     for line in f:
@@ -522,10 +547,32 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
         except Exception:
             # Ignore file-level errors, proceed to next
             continue
+    # Parse simple table files (e.g., asns-table-*.txt)
+    try:
+        for table_file in base.glob("*asns-table-*.txt"):
+            with table_file.open("r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.lower().startswith("asn"):
+                        # likely a header
+                        continue
+                    # Try formats: "AS12345, Name" or "AS12345\tName" or "12345 Name"
+                    parts = [p for p in (line.replace("\t", ",").split(",")) if p.strip()]
+                    if not parts:
+                        continue
+                    asn_part = parts[0].strip()
+                    asn_num = asn_part.upper().lstrip("AS")
+                    asn_name = parts[1].strip() if len(parts) > 1 else None
+                    ev = _record_to_event_like({"type": "ASN", "data": {"asn": asn_num, "name": asn_name}})
+                    if ev:
+                        ingest_event(ev, default_domain=default_domain)
+                        ingested += 1
+    except Exception:
+        pass
     return ingested
 
 
-def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2) -> int:
+def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2, max_age_seconds: int = 900) -> int:
     """Find the most recent BBOT scan directories and ingest from them.
     Returns total records ingested.
     """
@@ -542,9 +589,24 @@ def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2
             dirs.extend([d for d in root.iterdir() if d.is_dir()])
     if not dirs:
         return 0
-    dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
+    # prefer dirs containing consolidated outputs
+    dirs = [d for d in dirs if (d / "output.json").exists() or (d / "output.csv").exists() or (d / "subdomains.txt").exists()]
+    dirs.sort(key=lambda d: max((d / "output.json").stat().st_mtime if (d / "output.json").exists() else d.stat().st_mtime,
+                                (d / "output.csv").stat().st_mtime if (d / "output.csv").exists() else d.stat().st_mtime,
+                                (d / "subdomains.txt").stat().st_mtime if (d / "subdomains.txt").exists() else d.stat().st_mtime),
+              reverse=True)
     total = 0
+    now = int(Path("/").stat().st_mtime)  # cheap current mtime proxy
     for d in dirs[:max_dirs]:
+        # skip very old dirs
+        try:
+            m = max((d / "output.json").stat().st_mtime if (d / "output.json").exists() else d.stat().st_mtime,
+                    (d / "output.csv").stat().st_mtime if (d / "output.csv").exists() else d.stat().st_mtime,
+                    (d / "subdomains.txt").stat().st_mtime if (d / "subdomains.txt").exists() else d.stat().st_mtime)
+        except Exception:
+            m = d.stat().st_mtime
+        if max_age_seconds > 0 and (now - m) > max_age_seconds:
+            continue
         total += ingest_scan_dir(str(d), default_domain=default_domain)
     return total
 
