@@ -54,6 +54,13 @@ def ensure_constraints() -> None:
         "CREATE CONSTRAINT dns_name_unique IF NOT EXISTS FOR (dn:DNS_NAME) REQUIRE dn.name IS UNIQUE",
         "CREATE CONSTRAINT open_port_unique IF NOT EXISTS FOR (op:OPEN_TCP_PORT) REQUIRE op.endpoint IS UNIQUE",
         "CREATE CONSTRAINT technology_unique IF NOT EXISTS FOR (t:TECHNOLOGY) REQUIRE t.name IS UNIQUE",
+        "CREATE CONSTRAINT asn_unique IF NOT EXISTS FOR (a:ASN) REQUIRE a.number IS UNIQUE",
+        "CREATE CONSTRAINT protocol_unique IF NOT EXISTS FOR (p:PROTOCOL) REQUIRE p.name IS UNIQUE",
+        "CREATE CONSTRAINT finding_unique IF NOT EXISTS FOR (f:FINDING) REQUIRE f.id IS UNIQUE",
+        "CREATE CONSTRAINT mobile_app_unique IF NOT EXISTS FOR (ma:MOBILE_APP) REQUIRE ma.name IS UNIQUE",
+        "CREATE CONSTRAINT social_unique IF NOT EXISTS FOR (s:SOCIAL) REQUIRE s.handle IS UNIQUE",
+        "CREATE CONSTRAINT org_stub_unique IF NOT EXISTS FOR (og:ORG_STUB) REQUIRE og.name IS UNIQUE",
+        "CREATE CONSTRAINT azure_tenant_unique IF NOT EXISTS FOR (az:AZURE_TENANT) REQUIRE az.id IS UNIQUE",
     ]:
         list(neo4j_client.run(stmt))
 
@@ -66,6 +73,9 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     evid = event.get("id") or f"{etype}:{emodule}:{ts}:{hash(str(event))}"
     data = event.get("data") or {}
 
+    # Common normalized values
+    value = (event.get("data") or {}).get("value")
+
     params: dict[str, Any] = {
         "etype": etype,
         "module": emodule,
@@ -76,19 +86,30 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "host": data.get("host") or data.get("name") or data.get("fqdn"),
         "domain": data.get("domain") or default_domain,
         "ip": data.get("ip") or data.get("addr"),
-        "url": data.get("url") or data.get("value") if etype == "URL" else data.get("url"),
-        "email": data.get("email") or data.get("value") if etype == "EMAIL_ADDRESS" else data.get("email"),
+        # Treat URL_UNVERIFIED like URL for storage visibility
+        "url": data.get("url") or (value if etype in ("URL", "URL_UNVERIFIED") else data.get("url")),
+        "email": data.get("email") or (value if etype == "EMAIL_ADDRESS" else data.get("email")),
         "port": data.get("port"),
         "status": data.get("status") or "online",
         "sources": [emodule],
         "dns_name": None,
         "open_port_endpoint": None,
         "technology": None,
+        # Optional typed extras
+        "asn_number": None,
+        "asn_name": None,
+        "protocol_name": None,
+        "finding_id": None,
+        "finding_severity": None,
+        "mobile_app_name": None,
+        "social_handle": None,
+        "org_stub_name": None,
+        "azure_tenant_id": None,
     }
 
     # Extract DNS_NAME specific fields
     if etype == "DNS_NAME":
-        params["dns_name"] = data.get("name") or data.get("host")
+        params["dns_name"] = data.get("name") or data.get("host") or value
     
     # Extract OPEN_TCP_PORT specific fields
     if etype == "OPEN_TCP_PORT":
@@ -100,6 +121,48 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     # Extract TECHNOLOGY specific fields
     if etype == "TECHNOLOGY":
         params["technology"] = data.get("technology") or data.get("name")
+
+    # IP_ADDRESS events sometimes provide only value
+    if etype == "IP_ADDRESS" and not params["ip"]:
+        params["ip"] = value
+
+    # ASN mapping
+    if etype == "ASN":
+        asn_raw = data.get("asn") or data.get("number") or value
+        if asn_raw is not None:
+            try:
+                # Normalize to integer-like string (strip leading 'AS')
+                asn_str = str(asn_raw).upper().lstrip("AS")
+            except Exception:
+                asn_str = str(asn_raw)
+            params["asn_number"] = asn_str
+        params["asn_name"] = data.get("name") or data.get("holder")
+
+    # PROTOCOL mapping
+    if etype == "PROTOCOL":
+        params["protocol_name"] = data.get("name") or value
+
+    # FINDING mapping
+    if etype == "FINDING":
+        params["finding_id"] = data.get("id") or value
+        params["finding_severity"] = data.get("severity")
+
+    # MOBILE_APP
+    if etype == "MOBILE_APP":
+        params["mobile_app_name"] = data.get("name") or value
+
+    # SOCIAL
+    if etype == "SOCIAL":
+        params["social_handle"] = data.get("handle") or data.get("url") or value
+
+
+    # ORG_STUB
+    if etype == "ORG_STUB":
+        params["org_stub_name"] = data.get("name") or value
+
+    # AZURE_TENANT
+    if etype == "AZURE_TENANT":
+        params["azure_tenant_id"] = data.get("tenant_id") or value
 
     cypher = [
         "MERGE (m:Module {name: $module})",
@@ -164,6 +227,67 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     if params["port"] and params["host"]:
         cypher += [
             "SET h.ports = apoc.coll.toSet(coalesce(h.ports, []) + [$port])",
+        ]
+
+    # ASN node
+    if params["asn_number"]:
+        cypher += [
+            "MERGE (a:ASN {number: $asn_number})",
+            "SET a.name = coalesce($asn_name, a.name)",
+            "MERGE (ev)-[:ABOUT]->(a)",
+        ]
+        if params["ip"]:
+            cypher += [
+                "MERGE (i:IP {addr: $ip})",
+                "MERGE (i)-[:IN_ASN]->(a)",
+            ]
+
+    # PROTOCOL node
+    if params["protocol_name"]:
+        cypher += [
+            "MERGE (pr:PROTOCOL {name: $protocol_name})",
+            "MERGE (ev)-[:ABOUT]->(pr)",
+        ]
+
+    # FINDING node
+    if params["finding_id"]:
+        cypher += [
+            "MERGE (f:FINDING {id: $finding_id})",
+            "SET f.severity = coalesce($finding_severity, f.severity)",
+            "MERGE (ev)-[:ABOUT]->(f)",
+        ]
+        if params["host"]:
+            cypher += ["MERGE (f)-[:ON_HOST]->(h)"]
+
+    # MOBILE_APP node
+    if params["mobile_app_name"]:
+        cypher += [
+            "MERGE (ma:MOBILE_APP {name: $mobile_app_name})",
+            "MERGE (ev)-[:ABOUT]->(ma)",
+        ]
+
+    # SOCIAL node
+    if params["social_handle"]:
+        cypher += [
+            "MERGE (s:SOCIAL {handle: $social_handle})",
+            "MERGE (ev)-[:ABOUT]->(s)",
+        ]
+
+
+    # ORG_STUB node
+    if params["org_stub_name"]:
+        cypher += [
+            "MERGE (og:ORG_STUB {name: $org_stub_name})",
+            "MERGE (ev)-[:ABOUT]->(og)",
+        ]
+        if params["domain"]:
+            cypher += ["MERGE (og)-[:OWNS]->(d)"]
+
+    # AZURE_TENANT node
+    if params["azure_tenant_id"]:
+        cypher += [
+            "MERGE (az:AZURE_TENANT {id: $azure_tenant_id})",
+            "MERGE (ev)-[:ABOUT]->(az)",
         ]
 
     cypher += [
