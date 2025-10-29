@@ -112,9 +112,12 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "finding_id": None,
         "finding_severity": None,
         "mobile_app_name": None,
+        "mobile_app_url": None,
         "social_handle": None,
         "org_stub_name": None,
         "azure_tenant_id": None,
+        # Resolved IPs from BBOT (top-level key)
+        "resolved_ips": [],
     }
 
     # Extract DNS_NAME specific fields
@@ -160,6 +163,7 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     # MOBILE_APP
     if etype == "MOBILE_APP":
         params["mobile_app_name"] = data.get("name") or value
+        params["mobile_app_url"] = data.get("url")
 
     # SOCIAL
     if etype == "SOCIAL":
@@ -173,6 +177,13 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     # AZURE_TENANT
     if etype == "AZURE_TENANT":
         params["azure_tenant_id"] = data.get("tenant_id") or value
+
+    # Resolved IPs can be present at top-level (from output.json lines)
+    if isinstance(event.get("resolved_hosts"), list):
+        try:
+            params["resolved_ips"] = [str(x) for x in event.get("resolved_hosts")]
+        except Exception:
+            pass
 
     cypher = [
         "MERGE (m:Module {name: $module})",
@@ -214,6 +225,12 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
             "SET dn.last_seen_ts = $ts",
             "MERGE (ev)-[:ABOUT]->(dn)",
         ]
+        # Link DNS_NAME and Host to resolved IPs when available
+        cypher += [
+            "WITH ev, dn, h, $resolved_ips AS rips",
+            "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (dn)-[:RESOLVES_TO]->(i)"
+            + (" MERGE (h)-[:RESOLVES_TO]->(i)" if params.get("host") else ""),
+        ]
     
     # OPEN_TCP_PORT node
     if params["open_port_endpoint"]:
@@ -224,6 +241,12 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         ]
         if params["host"]:
             cypher += ["MERGE (op)-[:ON_HOST]->(h)"]
+        # Link port endpoint to resolved IPs when available
+        cypher += [
+            "WITH ev, op, h, $resolved_ips AS rips",
+            "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (op)-[:RESOLVES_TO]->(i)"
+            + (" MERGE (h)-[:RESOLVES_TO]->(i)" if params.get("host") else ""),
+        ]
     
     # TECHNOLOGY node
     if params["technology"]:
@@ -275,6 +298,11 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
             "MERGE (ma:MOBILE_APP {name: $mobile_app_name})",
             "MERGE (ev)-[:ABOUT]->(ma)",
         ]
+        if params.get("mobile_app_url"):
+            cypher += [
+                "MERGE (u:URL {value: $mobile_app_url})",
+                "MERGE (ma)-[:DOWNLOAD_URL]->(u)",
+            ]
 
     # SOCIAL node
     if params["social_handle"]:
