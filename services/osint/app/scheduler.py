@@ -4,7 +4,16 @@ import time
 from .config import settings
 from .bbot_runner import async_start_scan, _event_to_dict
 from .models import ScanRequest
-from .repository import ingest_event, cleanup_graph, ingest_latest_scan_dirs
+from .repository import (
+    ingest_event,
+    cleanup_graph,
+    ingest_latest_scan_dirs,
+    find_scan_dirs_for_target,
+    ingest_dirs_for_target,
+    ingest_dirs_by_scan_name,
+    list_scan_dirs,
+    ingest_scan_dir,
+)
 from .notifications import notify_telegram
 from loguru import logger
 
@@ -67,21 +76,63 @@ class ContinuousScanner:
                     
                     # Run scan
                     event_count = 0
+                    scan_name: str | None = None
+                    scan_start_ts = time.time()
+                    before_dirs = {str(p) for p in list_scan_dirs()}
                     async for event in async_start_scan(req):
-                        ingest_event(_event_to_dict(event), default_domain=target)
+                        ev = _event_to_dict(event)
+                        # Try to capture scan name when SCAN event appears
+                        if not scan_name and isinstance(ev, dict):
+                            try:
+                                if (ev.get("type") or "").upper() == "SCAN":
+                                    data = ev.get("data") or {}
+                                    # Flexible field matching
+                                    for k in ("scan_name","name","label","id","slug"):
+                                        v = data.get(k) or ev.get(k)
+                                        if isinstance(v, str) and v:
+                                            scan_name = v
+                                            break
+                            except Exception:
+                                pass
+                        ingest_event(ev, default_domain=target)
                         event_count += 1
                     
                     total_events += event_count
                     logger.info(f"✓ Target {target} completed: {event_count} events")
                     # Post-scan: schedule import after short delay to ensure files are flushed
-                    async def _import_after_delay(domain: str, delay: int = 12):
+                    async def _import_after_delay(domain: str, detect_delay: int = 1, read_delay: int = 15, sname: str | None = None, before: set[str] | None = None):
                         try:
-                            await asyncio.sleep(delay)
-                            extra = ingest_latest_scan_dirs(default_domain=domain, max_dirs=1, max_age_seconds=1800)
-                            logger.info(f"Imported {extra} additional records from scan directory for {domain}")
+                            # Phase 1: detect new dirs shortly after completion
+                            await asyncio.sleep(detect_delay)
+                            prev = before or set()
+                            after_dirs = {str(p) for p in list_scan_dirs()}
+                            new_dirs = sorted(set(after_dirs) - set(prev))
+                            # Phase 2: give time for files to flush before reading
+                            await asyncio.sleep(read_delay)
+                            used_dirs: list[str] = []
+                            total_ingested = 0
+                            if new_dirs:
+                                for d in new_dirs:
+                                    try:
+                                        p = d
+                                        total_ingested += ingest_scan_dir(p, default_domain=domain)
+                                        used_dirs.append(p)
+                                    except Exception:
+                                        continue
+                                logger.info(f"Imported {total_ingested} additional records for {domain} from new scan dirs: {used_dirs}")
+                                return
+                            # If no new dirs, fall back: if we captured scan name, try by name
+                            if sname:
+                                extra_by_name, used_by_name = ingest_dirs_by_scan_name(sname, default_domain=domain, max_dirs=1, max_age_seconds=7200)
+                                if used_by_name:
+                                    logger.info(f"Imported {extra_by_name} additional records for {domain} from scan '{sname}': {used_by_name}")
+                                    return
+                            # Finally, import latest recents as last resort
+                            extra2 = ingest_latest_scan_dirs(default_domain=domain, max_dirs=1, max_age_seconds=1800)
+                            logger.info(f"Imported {extra2} additional records from recent scan directory for {domain}")
                         except Exception as _e:
                             logger.debug(f"Scan dir import skipped/failed for {domain}: {_e}")
-                    asyncio.create_task(_import_after_delay(target, 12))
+                    asyncio.create_task(_import_after_delay(target, 1, 15, scan_name, before_dirs))
                     
                 except Exception as e:
                     logger.error(f"✗ Error scanning {target}: {e}")

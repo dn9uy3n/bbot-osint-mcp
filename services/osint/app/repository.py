@@ -610,3 +610,177 @@ def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2
         total += ingest_scan_dir(str(d), default_domain=default_domain)
     return total
 
+
+def _get_scan_roots() -> list[Path]:
+    roots = [
+        Path(os.path.expanduser("~/.bbot/scans")),
+        Path("/root/.bbot/scans"),
+        Path("/home/appuser/.bbot/scans"),
+    ]
+    uniq: list[Path] = []
+    for r in roots:
+        if r.exists() and r not in uniq:
+            uniq.append(r)
+    return uniq
+def list_scan_dirs() -> list[Path]:
+    dirs: list[Path] = []
+    for r in _get_scan_roots():
+        try:
+            for d in r.iterdir():
+                if d.is_dir():
+                    dirs.append(d)
+        except Exception:
+            continue
+    return dirs
+
+
+
+
+def _file_contains_text(p: Path, needle: str) -> bool:
+    try:
+        with p.open("r", encoding="utf-8", errors="ignore") as f:
+            for chunk in f:
+                if needle in chunk:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _is_sub_of_domain(domain: str, name: str) -> bool:
+    d = domain.lower().strip()
+    n = name.lower().strip()
+    return n == d or n.endswith("." + d)
+
+
+def find_scan_dirs_for_target(target: str, max_dirs: int = 2, max_age_seconds: int = 3600) -> list[Path]:
+    """Score and return likely scan directories for the given target domain."""
+    dirs: list[tuple[Path, int, float]] = []
+    for root in _get_scan_roots():
+        for d in root.iterdir():
+            if not d.is_dir():
+                continue
+            try:
+                # base recency
+                mtime = d.stat().st_mtime
+            except Exception:
+                continue
+            score = 0
+            # Prefer consolidated outputs
+            out_json = d / "output.json"
+            out_csv = d / "output.csv"
+            subs_txt = d / "subdomains.txt"
+            emails_txt = d / "emails.txt"
+            scan_log = d / "scan.log"
+            # Search for target string
+            if out_json.exists() and _file_contains_text(out_json, target):
+                score += 100
+                try:
+                    mtime = max(mtime, out_json.stat().st_mtime)
+                except Exception:
+                    pass
+            if scan_log.exists() and _file_contains_text(scan_log, target):
+                score += 80
+                try:
+                    mtime = max(mtime, scan_log.stat().st_mtime)
+                except Exception:
+                    pass
+            if out_csv.exists() and _file_contains_text(out_csv, target):
+                score += 50
+                try:
+                    mtime = max(mtime, out_csv.stat().st_mtime)
+                except Exception:
+                    pass
+            # subdomains: look for suffix match
+            if subs_txt.exists():
+                try:
+                    with subs_txt.open("r", encoding="utf-8", errors="ignore") as f:
+                        for line in f:
+                            if _is_sub_of_domain(target, line.strip()):
+                                score += 60
+                                break
+                except Exception:
+                    pass
+                try:
+                    mtime = max(mtime, subs_txt.stat().st_mtime)
+                except Exception:
+                    pass
+            if emails_txt.exists() and _file_contains_text(emails_txt, "@" + target):
+                score += 20
+                try:
+                    mtime = max(mtime, emails_txt.stat().st_mtime)
+                except Exception:
+                    pass
+            # Penalize dirs with no indicative files
+            if score == 0 and not (out_json.exists() or out_csv.exists() or subs_txt.exists()):
+                continue
+            # Age filter
+            if max_age_seconds > 0:
+                try:
+                    now_m = max(Path("/").stat().st_mtime, mtime)
+                except Exception:
+                    now_m = mtime
+                if (now_m - mtime) > max_age_seconds:
+                    continue
+            dirs.append((d, score, mtime))
+    # sort by score desc, then mtime desc
+    dirs.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return [d for d, _, _ in dirs[:max_dirs]]
+
+
+def find_scan_dirs_by_name(scan_name: str, max_dirs: int = 1, max_age_seconds: int = 7200) -> list[Path]:
+    """Return scan directories matching the exact BBOT scan name.
+    Matches directory name equals scan_name, or scan.log contains 'Scan <scan_name>'.
+    """
+    results: list[tuple[Path, float]] = []
+    for root in _get_scan_roots():
+        for d in root.iterdir():
+            if not d.is_dir():
+                continue
+            try:
+                mtime = d.stat().st_mtime
+            except Exception:
+                continue
+            if d.name == scan_name:
+                results.append((d, mtime))
+                continue
+            slog = d / "scan.log"
+            if slog.exists() and _file_contains_text(slog, f"Scan {scan_name} "):
+                try:
+                    mtime = max(mtime, slog.stat().st_mtime)
+                except Exception:
+                    pass
+                results.append((d, mtime))
+    # filter by age if requested
+    if max_age_seconds > 0 and results:
+        try:
+            now_m = max(Path("/").stat().st_mtime, max(m for _, m in results))
+        except Exception:
+            now_m = max(m for _, m in results)
+        results = [(p, m) for (p, m) in results if (now_m - m) <= max_age_seconds]
+    results.sort(key=lambda x: x[1], reverse=True)
+    return [p for p, _ in results[:max_dirs]]
+
+
+def ingest_dirs_by_scan_name(scan_name: str, default_domain: str | None = None, max_dirs: int = 1, max_age_seconds: int = 7200) -> tuple[int, list[str]]:
+    selected = find_scan_dirs_by_name(scan_name, max_dirs=max_dirs, max_age_seconds=max_age_seconds)
+    total = 0
+    used: list[str] = []
+    for d in selected:
+        used.append(str(d))
+        total += ingest_scan_dir(str(d), default_domain=default_domain)
+    return total, used
+
+
+def ingest_dirs_for_target(target: str, default_domain: str | None = None, max_dirs: int = 1, max_age_seconds: int = 3600) -> tuple[int, list[str]]:
+    """Find and ingest results from dirs most likely matching the given target.
+    Returns (ingested_count, used_dir_names).
+    """
+    selected = find_scan_dirs_for_target(target, max_dirs=max_dirs, max_age_seconds=max_age_seconds)
+    total = 0
+    used: list[str] = []
+    for d in selected:
+        used.append(str(d))
+        total += ingest_scan_dir(str(d), default_domain=default_domain)
+    return total, used
+
