@@ -464,13 +464,30 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
         "results.json",
         "scan.json",
         "graph.json",
+        # Common BBOT consolidated output
+        "output.json",
+        # Simple text artifacts
+        "subdomains.txt",
+        "emails.txt",
     ]
     for name in candidates:
         p = base / name
         if not p.exists():
             continue
         try:
-            if p.suffix == ".jsonl":
+            if p.name in ("subdomains.txt", "emails.txt"):
+                with p.open("r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        val = line.strip()
+                        if not val:
+                            continue
+                        if p.name == "subdomains.txt":
+                            ev = {"type": "DNS_NAME", "data": {"name": val, "host": val, "domain": default_domain}}
+                        else:
+                            ev = {"type": "EMAIL_ADDRESS", "data": {"email": val, "value": val}}
+                        ingest_event(ev, default_domain=default_domain)
+                        ingested += 1
+            elif p.suffix == ".jsonl":
                 with p.open("r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
@@ -513,11 +530,18 @@ def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2
     Returns total records ingested.
     """
     # Default BBOT scans location inside container
-    scans_root = os.path.expanduser("~/.bbot/scans")
-    root = Path(scans_root)
-    if not root.exists():
+    candidate_roots = [
+        os.path.expanduser("~/.bbot/scans"),
+        "/root/.bbot/scans",
+        "/home/appuser/.bbot/scans",
+    ]
+    dirs: list[Path] = []
+    for r in candidate_roots:
+        root = Path(r)
+        if root.exists():
+            dirs.extend([d for d in root.iterdir() if d.is_dir()])
+    if not dirs:
         return 0
-    dirs = [d for d in root.iterdir() if d.is_dir()]
     dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
     total = 0
     for d in dirs[:max_dirs]:

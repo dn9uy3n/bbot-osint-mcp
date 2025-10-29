@@ -73,13 +73,15 @@ class ContinuousScanner:
                     
                     total_events += event_count
                     logger.info(f"✓ Target {target} completed: {event_count} events")
-                    # Post-scan: import detailed results from latest BBOT scan dirs
-                    try:
-                        extra = ingest_latest_scan_dirs(default_domain=target, max_dirs=1)
-                        if extra:
-                            logger.info(f"Imported {extra} additional records from scan directory for {target}")
-                    except Exception as _e:
-                        logger.debug(f"Scan dir import skipped/failed for {target}: {_e}")
+                    # Post-scan: schedule import after short delay to ensure files are flushed
+                    async def _import_after_delay(domain: str, delay: int = 8):
+                        try:
+                            await asyncio.sleep(delay)
+                            extra = ingest_latest_scan_dirs(default_domain=domain, max_dirs=1)
+                            logger.info(f"Imported {extra} additional records from scan directory for {domain}")
+                        except Exception as _e:
+                            logger.debug(f"Scan dir import skipped/failed for {domain}: {_e}")
+                    asyncio.create_task(_import_after_delay(target, 8))
                     
                 except Exception as e:
                     logger.error(f"✗ Error scanning {target}: {e}")
