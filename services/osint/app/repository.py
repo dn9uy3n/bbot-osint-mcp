@@ -472,6 +472,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
     if not p.exists() or not p.is_file():
         return 0
     count = 0
+    current_seeds: list[str] = []
     with p.open("r", encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.strip()
@@ -515,6 +516,11 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     seeds = tgt.get("seeds") or []
                 except Exception:
                     seeds = []
+                # Remember seeds for subsequent lines in this file
+                try:
+                    current_seeds = list(seeds)
+                except Exception:
+                    current_seeds = []
                 params.update({"scan_name": scan_name, "seeds": list(seeds)})
                 cypher.extend([
                     "MERGE (sc:SCAN {name: $scan_name})",
@@ -533,7 +539,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 # Host for linkage should come from data (string) if present, else fallback to ev.host
                 host_from_data = data if isinstance(data, str) else (data.get("host") if isinstance(data, dict) else None)
                 host_val = host_from_data or host
-                params.update({"dns_label": dns_label, "host": host_val, "resolved": list(resolved_hosts)})
+                params.update({"dns_label": dns_label, "host": host_val, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (dn:DNS_NAME {name: $dns_label})",
                     "SET dn.tags = apoc.coll.toSet(coalesce(dn.tags, []) + $tags)",
@@ -547,10 +553,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                # Link Host to Domain seeds if present
+                if current_seeds and host_val:
+                    cypher.extend([
+                        "WITH $host AS fq, $scan_seeds AS seeds",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
+                    ])
 
             elif etype == "OPEN_TCP_PORT":
                 port = ev.get("port") or data.get("port")
-                params.update({"port": port, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"port": port, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 if host and port:
                     params["endpoint"] = f"{host}:{port}"
                 else:
@@ -567,10 +580,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (op:OPEN_TCP_PORT {endpoint: ep})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (op)-[:RESOLVES_TO]->(i)",
                     ])
+                # Link Host and Port to Domain seeds if present
+                if current_seeds and host:
+                    cypher.extend([
+                        "WITH $host AS fq, $scan_seeds AS seeds",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
+                    ])
 
             elif etype == "TECHNOLOGY":
                 tech = data.get("technology") or data.get("name")
-                params.update({"tech": tech, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"tech": tech, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (t:TECHNOLOGY {name: $tech})",
                     "SET t.tags = apoc.coll.toSet(coalesce(t.tags, []) + $tags)",
@@ -583,10 +603,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                # Link Host to Domain seeds if present
+                if current_seeds and host:
+                    cypher.extend([
+                        "WITH $host AS fq, $scan_seeds AS seeds",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
+                    ])
 
             elif etype == "EMAIL_ADDRESS":
                 email_val = data if isinstance(data, str) else (data.get("email") or data.get("value") or ev.get("data"))
-                params.update({"email": email_val, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"email": email_val, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (e:EMAIL {value: $email})",
                     "SET e.tags = apoc.coll.toSet(coalesce(e.tags, []) + $tags)",
@@ -599,23 +626,36 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                # Link EMAIL to Domain seeds if present
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $email AS evl, $scan_seeds AS seeds",
+                        "MATCH (e:EMAIL {value: evl})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (e)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "MOBILE_APP":
                 app_id = data.get("id") or data.get("name")
                 # Per request, use data.url; if missing, we won't set URL
                 url = data.get("url")
-                params.update({"app_id": app_id, "url": url})
+                params.update({"app_id": app_id, "url": url, "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (ma:MOBILE_APP {name: $app_id})",
                     "SET ma.tags = apoc.coll.toSet(coalesce(ma.tags, []) + $tags)",
                 ])
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (ma)-[:DOWNLOAD_URL]->(u)"])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $app_id AS an, $scan_seeds AS seeds",
+                        "MATCH (ma:MOBILE_APP {name: an})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (ma)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype in ("URL", "URL_UNVERIFIED"):
                 # Per request, use `data` as the URL value (string), otherwise data.url/value
                 url = data if isinstance(data, str) else (data.get("url") or data.get("value") or ev.get("data"))
-                params.update({"url": url, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"url": url, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (u:URL {value: $url})",
                     "SET u.tags = apoc.coll.toSet(coalesce(u.tags, []) + $tags)",
@@ -628,6 +668,12 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (u)-[:ON_HOST]->(h)"])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $url AS uv, $scan_seeds AS seeds",
+                        "MATCH (u:URL {value: uv})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (u)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "ASN":
                 asn_val = data if isinstance(data, str) else (data.get("asn") or data.get("number") or data.get("value"))
@@ -637,7 +683,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             elif etype == "FINDING":
                 desc = (data.get("description") or data.get("title") or data.get("name"))
                 url = data.get("url")
-                params.update({"desc": desc, "url": url, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"desc": desc, "url": url, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (f:FINDING {id: $desc})",
                     "SET f.tags = apoc.coll.toSet(coalesce(f.tags, []) + $tags)",
@@ -652,11 +698,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $desc AS fid, $scan_seeds AS seeds",
+                        "MATCH (f:FINDING {id: fid})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (f)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "STORAGE_BUCKET":
                 name = data.get("name")
                 url = data.get("url")
-                params.update({"bucket": name, "url": url, "host": host, "resolved": list(resolved_hosts)})
+                params.update({"bucket": name, "url": url, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (sb:STORAGE_BUCKET {name: $bucket})",
                     "SET sb.tags = apoc.coll.toSet(coalesce(sb.tags, []) + $tags)",
@@ -671,11 +723,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $bucket AS bn, $scan_seeds AS seeds",
+                        "MATCH (sb:STORAGE_BUCKET {name: bn})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (sb)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "PROTOCOL":
                 proto = data.get("protocol") or data.get("name")
                 port = ev.get("port") or data.get("port")
-                params.update({"proto": proto, "host": host, "port": port, "resolved": list(resolved_hosts)})
+                params.update({"proto": proto, "host": host, "port": port, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (pr:PROTOCOL {name: $proto})",
                     "SET pr.tags = apoc.coll.toSet(coalesce(pr.tags, []) + $tags)",
@@ -695,26 +753,44 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "MATCH (h:Host {fqdn: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $proto AS pn, $scan_seeds AS seeds",
+                        "MATCH (pr:PROTOCOL {name: pn})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (pr)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "SOCIAL":
                 platform = data.get("platform") or data.get("name")
-                params.update({"platform": platform, "host": host})
+                params.update({"platform": platform, "host": host, "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (s:SOCIAL {handle: $platform})",
                     "SET s.tags = apoc.coll.toSet(coalesce(s.tags, []) + $tags)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (s)-[:ON_HOST]->(h)"])
+                if current_seeds:
+                    cypher.extend([
+                        "WITH $platform AS ph, $scan_seeds AS seeds",
+                        "MATCH (s:SOCIAL {handle: ph})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (s)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "CODE_REPOSITORY":
                 repo_url = data.get("url")
-                params.update({"repo_url": repo_url, "host": host})
+                params.update({"repo_url": repo_url, "host": host, "scan_seeds": list(current_seeds)})
                 cypher.extend([
                     "MERGE (cr:CODE_REPOSITORY {url: $repo_url})",
                     "SET cr.tags = apoc.coll.toSet(coalesce(cr.tags, []) + $tags)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (cr)-[:ON_HOST]->(h)"])
+                if current_seeds and repo_url:
+                    cypher.extend([
+                        "WITH $repo_url AS ru, $scan_seeds AS seeds",
+                        "MATCH (cr:CODE_REPOSITORY {url: ru})",
+                        "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (cr)-[:OF_DOMAIN]->(d)",
+                    ])
 
             elif etype == "IP_ADDRESS":
                 ip_val = data if isinstance(data, str) else (data.get("ip") or data.get("addr") or data.get("value"))
