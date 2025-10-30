@@ -64,6 +64,11 @@ def ensure_constraints() -> None:
         "CREATE CONSTRAINT social_unique IF NOT EXISTS FOR (s:SOCIAL) REQUIRE s.handle IS UNIQUE",
         "CREATE CONSTRAINT org_stub_unique IF NOT EXISTS FOR (og:ORG_STUB) REQUIRE og.name IS UNIQUE",
         "CREATE CONSTRAINT azure_tenant_unique IF NOT EXISTS FOR (az:AZURE_TENANT) REQUIRE az.id IS UNIQUE",
+        # Additional labels requested
+        "CREATE CONSTRAINT scan_unique IF NOT EXISTS FOR (sc:SCAN) REQUIRE sc.name IS UNIQUE",
+        "CREATE CONSTRAINT storage_bucket_unique IF NOT EXISTS FOR (sb:STORAGE_BUCKET) REQUIRE sb.name IS UNIQUE",
+        "CREATE CONSTRAINT code_repository_unique IF NOT EXISTS FOR (cr:CODE_REPOSITORY) REQUIRE cr.url IS UNIQUE",
+        "CREATE CONSTRAINT email_upper_unique IF NOT EXISTS FOR (e2:EMAIL) REQUIRE e2.value IS UNIQUE",
     ]:
         list(neo4j_client.run(stmt))
 
@@ -86,6 +91,31 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
     # Common normalized values
     value = data.get("value") if isinstance(data, dict) else (raw_data if isinstance(raw_data, str) else None)
 
+    # Prefer FQDN for host when available
+    host_pref = (
+        event.get("fqdn")
+        or data.get("fqdn")
+        or event.get("host")
+        or data.get("host")
+        or event.get("netloc")
+        or data.get("netloc")
+        or None
+    )
+
+    # URL value rules: for URL/URL_UNVERIFIED, the value is the raw data string when present
+    url_value: str | None = None
+    if etype in ("URL", "URL_UNVERIFIED"):
+        url_value = raw_data if isinstance(raw_data, str) else (data.get("url") or value)
+    else:
+        url_value = data.get("url")
+
+    # EMAIL value rules: often the raw data is the email string
+    email_value: str | None = None
+    if etype == "EMAIL_ADDRESS":
+        email_value = raw_data if isinstance(raw_data, str) else (data.get("email") or value)
+    else:
+        email_value = data.get("email")
+
     params: dict[str, Any] = {
         "etype": etype,
         "module": emodule,
@@ -93,12 +123,13 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         "evid": evid,
         # Store event payload as JSON string to satisfy Neo4j property types
         "raw": json.dumps(event, ensure_ascii=False, default=str),
-        "host": data.get("host") or data.get("name") or data.get("fqdn"),
+        "host": host_pref,
         "domain": data.get("domain") or default_domain,
         "ip": data.get("ip") or data.get("addr"),
-        # Treat URL_UNVERIFIED like URL for storage visibility
-        "url": data.get("url") or (value if etype in ("URL", "URL_UNVERIFIED") else data.get("url")),
-        "email": data.get("email") or (value if etype == "EMAIL_ADDRESS" else data.get("email")),
+        # URL mapping
+        "url": url_value,
+        # Email mapping
+        "email": email_value,
         "port": data.get("port"),
         "status": data.get("status") or "online",
         "sources": [emodule],
@@ -122,18 +153,43 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
 
     # Extract DNS_NAME specific fields
     if etype == "DNS_NAME":
-        params["dns_name"] = data.get("name") or data.get("host") or value
+        # For DNS_NAME from output.json: host is the fqdn and resolved_hosts are the IPs
+        params["host"] = event.get("host") or data.get("host") or params.get("host")
+        params["dns_name"] = event.get("host") or data.get("name") or data.get("host") or value
+        if isinstance(event.get("resolved_hosts"), list):
+            try:
+                params["resolved_ips"] = [str(x) for x in event.get("resolved_hosts")]
+            except Exception:
+                pass
     
     # Extract OPEN_TCP_PORT specific fields
     if etype == "OPEN_TCP_PORT":
-        host_val = data.get("host") or ""
-        port_val = data.get("port") or 0
+        # For OPEN_TCP_PORT from output.json: port is event.port, host is event.host, resolved_hosts are IPs
+        host_val = (
+            event.get("host")
+            or data.get("host")
+            or (str(event.get("netloc")).split(":")[0] if event.get("netloc") else "")
+        )
+        port_val = event.get("port") or data.get("port") or 0
         params["open_port_endpoint"] = f"{host_val}:{port_val}"
         params["port"] = port_val
+        params["host"] = host_val or params.get("host")
+        if isinstance(event.get("resolved_hosts"), list):
+            try:
+                params["resolved_ips"] = [str(x) for x in event.get("resolved_hosts")]
+            except Exception:
+                pass
     
     # Extract TECHNOLOGY specific fields
     if etype == "TECHNOLOGY":
         params["technology"] = data.get("technology") or data.get("name")
+
+    # URL/URL_UNVERIFIED often carry host+port; create port endpoint for them too
+    if etype in ("URL", "URL_UNVERIFIED") and params.get("port") and params.get("host"):
+        try:
+            params["open_port_endpoint"] = f"{params['host']}:{int(params['port'])}"
+        except Exception:
+            params["open_port_endpoint"] = f"{params['host']}:{params['port']}"
 
     # IP_ADDRESS events sometimes provide only value
     if etype == "IP_ADDRESS" and not params["ip"]:
@@ -162,8 +218,9 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
 
     # MOBILE_APP
     if etype == "MOBILE_APP":
-        params["mobile_app_name"] = data.get("name") or value
-        params["mobile_app_url"] = data.get("url")
+        # For MOBILE_APP from output.json: download link is data.uri (prefer), then data.url
+        params["mobile_app_name"] = data.get("name") or data.get("id") or value
+        params["mobile_app_url"] = data.get("uri") or data.get("url")
 
     # SOCIAL
     if etype == "SOCIAL":
@@ -225,12 +282,6 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
             "SET dn.last_seen_ts = $ts",
             "MERGE (ev)-[:ABOUT]->(dn)",
         ]
-        # Link DNS_NAME and Host to resolved IPs when available
-        cypher += [
-            "WITH ev, dn, h, $resolved_ips AS rips",
-            "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (dn)-[:RESOLVES_TO]->(i)"
-            + (" MERGE (h)-[:RESOLVES_TO]->(i)" if params.get("host") else ""),
-        ]
     
     # OPEN_TCP_PORT node
     if params["open_port_endpoint"]:
@@ -241,12 +292,6 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         ]
         if params["host"]:
             cypher += ["MERGE (op)-[:ON_HOST]->(h)"]
-        # Link port endpoint to resolved IPs when available
-        cypher += [
-            "WITH ev, op, h, $resolved_ips AS rips",
-            "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (op)-[:RESOLVES_TO]->(i)"
-            + (" MERGE (h)-[:RESOLVES_TO]->(i)" if params.get("host") else ""),
-        ]
     
     # TECHNOLOGY node
     if params["technology"]:
@@ -302,6 +347,37 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
             cypher += [
                 "MERGE (u:URL {value: $mobile_app_url})",
                 "MERGE (ma)-[:DOWNLOAD_URL]->(u)",
+            ]
+
+    # After creating nodes, link resolved IPs by property matches to avoid scope issues
+    if params.get("resolved_ips"):
+        # Link DNS_NAME -> IP
+        if params.get("dns_name"):
+            cypher += [
+                "WITH $dns_name AS dn_name, $resolved_ips AS rips",
+                "MATCH (dn:DNS_NAME {name: dn_name})",
+                "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (dn)-[:RESOLVES_TO]->(i)",
+            ]
+        # Link Host -> IP
+        if params.get("host"):
+            cypher += [
+                "WITH $host AS fq, $resolved_ips AS rips",
+                "MATCH (h3:Host {fqdn: fq})",
+                "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h3)-[:RESOLVES_TO]->(i)",
+            ]
+        # Link OPEN_TCP_PORT -> IP
+        if params.get("open_port_endpoint"):
+            cypher += [
+                "WITH $open_port_endpoint AS ep, $resolved_ips AS rips",
+                "MATCH (op2:OPEN_TCP_PORT {endpoint: ep})",
+                "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (op2)-[:RESOLVES_TO]->(i)",
+            ]
+        # Link URL -> IP
+        if params.get("url"):
+            cypher += [
+                "WITH $url AS uv, $resolved_ips AS rips",
+                "MATCH (u2:URL {value: uv})",
+                "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (u2)-[:RESOLVES_TO]->(i)",
             ]
 
     # SOCIAL node
@@ -381,6 +457,279 @@ def query_events(
         + "ORDER BY ev.ts DESC LIMIT $limit"
     )
     return neo4j_client.run(query, params)
+
+
+def ingest_output_json_file(file_path: str, default_domain: str | None = None) -> int:
+    """Read BBOT consolidated output.json as JSON Lines and ingest per custom mapping.
+
+    - Creates main node per type as specified.
+    - Attaches tags from line (if present) onto the main node as a property `tags`.
+    - Uses MERGE to create missing linked objects.
+
+    Returns number of lines ingested.
+    """
+    p = Path(file_path)
+    if not p.exists() or not p.is_file():
+        return 0
+    count = 0
+    with p.open("r", encoding="utf-8", errors="ignore") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except Exception:
+                continue
+
+            etype = (ev.get("type") or "").upper()
+            data = ev.get("data") or {}
+            tags = ev.get("tags") if isinstance(ev.get("tags"), list) else []
+            host = ev.get("host") or data.get("host")
+            resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
+
+            cypher: list[str] = []
+            params: dict[str, Any] = {"tags": tags or []}
+
+            def merge_host_rel(var: str = "h") -> None:
+                nonlocal cypher
+                if host:
+                    cypher.extend([
+                        "MERGE (h:Host {fqdn: $host})",
+                    ])
+
+            def link_resolved_to(node_var: str, rel_type: str = "RESOLVES_TO") -> None:
+                nonlocal cypher
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $resolved AS rips",
+                        f"UNWIND rips AS rip MERGE (i:IP {{addr: rip}}) MERGE ({node_var})-[:{rel_type}]->(i)",
+                    ])
+
+            # Build per-type
+            if etype == "SCAN":
+                scan_name = (data.get("name") or ev.get("name") or ev.get("id") or "").strip()
+                seeds = []
+                try:
+                    tgt = data.get("target") or {}
+                    seeds = tgt.get("seeds") or []
+                except Exception:
+                    seeds = []
+                params.update({"scan_name": scan_name, "seeds": list(seeds)})
+                cypher.extend([
+                    "MERGE (sc:SCAN {name: $scan_name})",
+                    "SET sc.tags = apoc.coll.toSet(coalesce(sc.tags, []) + $tags)",
+                ])
+                if params.get("seeds"):
+                    cypher.extend([
+                        "UNWIND $seeds AS sd MERGE (d:Domain {name: sd}) MERGE (sc)-[:TARGETS]->(d)",
+                    ])
+
+            elif etype == "DNS_NAME":
+                # Label value from dns_children.NS (first) else data/name/host
+                dns_children = ev.get("dns_children") or {}
+                ns_vals = dns_children.get("NS") if isinstance(dns_children.get("NS"), list) else []
+                dns_label = ns_vals[0] if ns_vals else (data.get("name") or data.get("host") or host)
+                # Host for linkage should come from data (string) if present, else fallback to ev.host
+                host_from_data = data if isinstance(data, str) else (data.get("host") if isinstance(data, dict) else None)
+                host_val = host_from_data or host
+                params.update({"dns_label": dns_label, "host": host_val, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (dn:DNS_NAME {name: $dns_label})",
+                    "SET dn.tags = apoc.coll.toSet(coalesce(dn.tags, []) + $tags)",
+                ])
+                if host_val:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (dn)-[:ON_HOST]->(h)"])
+                # Per request, link HOST to IPs from resolved_hosts
+                if host_val and resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "OPEN_TCP_PORT":
+                port = ev.get("port") or data.get("port")
+                params.update({"port": port, "host": host, "resolved": list(resolved_hosts)})
+                if host and port:
+                    params["endpoint"] = f"{host}:{port}"
+                else:
+                    params["endpoint"] = None
+                cypher.extend([
+                    "MERGE (op:OPEN_TCP_PORT {endpoint: $endpoint})",
+                    "SET op.port = $port, op.tags = apoc.coll.toSet(coalesce(op.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (op)-[:ON_HOST]->(h)"])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $endpoint AS ep, $resolved AS rips",
+                        "MATCH (op:OPEN_TCP_PORT {endpoint: ep})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (op)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "TECHNOLOGY":
+                tech = data.get("technology") or data.get("name")
+                params.update({"tech": tech, "host": host, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (t:TECHNOLOGY {name: $tech})",
+                    "SET t.tags = apoc.coll.toSet(coalesce(t.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (h)-[:USES_TECH]->(t)"])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "EMAIL_ADDRESS":
+                email_val = data if isinstance(data, str) else (data.get("email") or data.get("value") or ev.get("data"))
+                params.update({"email": email_val, "host": host, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (e:EMAIL {value: $email})",
+                    "SET e.tags = apoc.coll.toSet(coalesce(e.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (e)-[:ON_HOST]->(h)"])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "MOBILE_APP":
+                app_id = data.get("id") or data.get("name")
+                # Per request, use data.url; if missing, we won't set URL
+                url = data.get("url")
+                params.update({"app_id": app_id, "url": url})
+                cypher.extend([
+                    "MERGE (ma:MOBILE_APP {name: $app_id})",
+                    "SET ma.tags = apoc.coll.toSet(coalesce(ma.tags, []) + $tags)",
+                ])
+                if url:
+                    cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (ma)-[:DOWNLOAD_URL]->(u)"])
+
+            elif etype in ("URL", "URL_UNVERIFIED"):
+                # Per request, use `data` as the URL value (string), otherwise data.url/value
+                url = data if isinstance(data, str) else (data.get("url") or data.get("value") or ev.get("data"))
+                params.update({"url": url, "host": host, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (u:URL {value: $url})",
+                    "SET u.tags = apoc.coll.toSet(coalesce(u.tags, []) + $tags)",
+                ])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $url AS uv, $resolved AS rips",
+                        "MATCH (u:URL {value: uv})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (u)-[:RESOLVES_TO]->(i)",
+                    ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (u)-[:ON_HOST]->(h)"])
+
+            elif etype == "ASN":
+                asn_val = data if isinstance(data, str) else (data.get("asn") or data.get("number") or data.get("value"))
+                params.update({"asn": str(asn_val).upper().lstrip("AS") if asn_val is not None else None})
+                cypher.extend(["MERGE (a:ASN {number: $asn})", "SET a.tags = apoc.coll.toSet(coalesce(a.tags, []) + $tags)"])
+
+            elif etype == "FINDING":
+                desc = (data.get("description") or data.get("title") or data.get("name"))
+                url = data.get("url")
+                params.update({"desc": desc, "url": url, "host": host, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (f:FINDING {id: $desc})",
+                    "SET f.tags = apoc.coll.toSet(coalesce(f.tags, []) + $tags)",
+                ])
+                if url:
+                    cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (f)-[:RELATED_URL]->(u)"])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (f)-[:ON_HOST]->(h)"])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "STORAGE_BUCKET":
+                name = data.get("name")
+                url = data.get("url")
+                params.update({"bucket": name, "url": url, "host": host, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (sb:STORAGE_BUCKET {name: $bucket})",
+                    "SET sb.tags = apoc.coll.toSet(coalesce(sb.tags, []) + $tags)",
+                ])
+                if url:
+                    cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (sb)-[:EXPOSED_AT]->(u)"])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (sb)-[:ON_HOST]->(h)"])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "PROTOCOL":
+                proto = data.get("protocol") or data.get("name")
+                port = ev.get("port") or data.get("port")
+                params.update({"proto": proto, "host": host, "port": port, "resolved": list(resolved_hosts)})
+                cypher.extend([
+                    "MERGE (pr:PROTOCOL {name: $proto})",
+                    "SET pr.tags = apoc.coll.toSet(coalesce(pr.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (pr)-[:ON_HOST]->(h)"])
+                if port and host:
+                    cypher.extend([
+                        "WITH $host AS fq, $port AS p",
+                        "WITH fq, p, fq + ':' + toString(p) AS ep",
+                        "MERGE (op:OPEN_TCP_PORT {endpoint: ep})",
+                        "MERGE (pr)-[:ON_PORT]->(op)",
+                    ])
+                if resolved_hosts:
+                    cypher.extend([
+                        "WITH $host AS fq, $resolved AS rips",
+                        "MATCH (h:Host {fqdn: fq})",
+                        "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
+                    ])
+
+            elif etype == "SOCIAL":
+                platform = data.get("platform") or data.get("name")
+                params.update({"platform": platform, "host": host})
+                cypher.extend([
+                    "MERGE (s:SOCIAL {handle: $platform})",
+                    "SET s.tags = apoc.coll.toSet(coalesce(s.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (s)-[:ON_HOST]->(h)"])
+
+            elif etype == "CODE_REPOSITORY":
+                repo_url = data.get("url")
+                params.update({"repo_url": repo_url, "host": host})
+                cypher.extend([
+                    "MERGE (cr:CODE_REPOSITORY {url: $repo_url})",
+                    "SET cr.tags = apoc.coll.toSet(coalesce(cr.tags, []) + $tags)",
+                ])
+                if host:
+                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (cr)-[:ON_HOST]->(h)"])
+
+            elif etype == "IP_ADDRESS":
+                ip_val = data if isinstance(data, str) else (data.get("ip") or data.get("addr") or data.get("value"))
+                params.update({"ip": ip_val})
+                cypher.extend(["MERGE (i:IP {addr: $ip})"])  # Reuse IP label for main object
+
+            else:
+                # Skip unknown types quietly
+                continue
+
+            # Execute if we have any statements
+            if cypher:
+                list(neo4j_client.run("\n".join(cypher), params))
+                count += 1
+    return count
 
 
 def cleanup_graph(now_epoch: int) -> dict:
