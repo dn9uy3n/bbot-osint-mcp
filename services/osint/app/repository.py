@@ -473,6 +473,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
         return 0
     count = 0
     current_seeds: list[str] = []
+    parsed_any_line = False
     with p.open("r", encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.strip()
@@ -482,6 +483,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 ev = json.loads(line)
             except Exception:
                 continue
+            parsed_any_line = True
 
             etype = (ev.get("type") or "").upper()
             data = ev.get("data") or {}
@@ -531,11 +533,16 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (sc:SCAN {name: $scan_name})",
                     "SET sc.tags = apoc.coll.toSet(coalesce(sc.tags, []) + $tags)",
-                    "WITH sc MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(sc)",
+                    "WITH sc, $evid AS evid, $seeds AS seeds",
+                    "MATCH (ev:EVENT {id: evid})",
+                    "MERGE (ev)-[:ABOUT]->(sc)",
                 ])
                 if params.get("seeds"):
                     cypher.extend([
-                        "UNWIND $seeds AS sd MERGE (d:Domain {name: sd}) MERGE (sc)-[:TARGETS]->(d)",
+                        "WITH sc, seeds",
+                        "UNWIND seeds AS sd",
+                        "MERGE (d:Domain {name: sd})",
+                        "MERGE (sc)-[:TARGETS]->(d)",
                     ])
 
             elif etype == "DNS_NAME":
@@ -821,6 +828,75 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 continue
 
             # Execute if we have any statements
+            if cypher:
+                list(neo4j_client.run("\n".join(cypher), params))
+                count += 1
+
+    # Fallback: if no JSONL lines parsed, try full-file JSON (array or object)
+    if not parsed_any_line and count == 0:
+        txt = p.read_text(encoding="utf-8", errors="ignore")
+        try:
+            obj = json.loads(txt)
+        except Exception:
+            return 0
+        items: list[Any] = []
+        if isinstance(obj, list):
+            items = obj
+        elif isinstance(obj, dict):
+            for key in ("events", "artifacts", "results", "items", "data"):
+                if isinstance(obj.get(key), list):
+                    items = obj[key]
+                    break
+            if not items:
+                items = [obj]
+        for ev in items:
+            if not isinstance(ev, dict):
+                continue
+            etype = (ev.get("type") or "").upper()
+            data = ev.get("data") or {}
+            tags = ev.get("tags") if isinstance(ev.get("tags"), list) else []
+            host = ev.get("host") or data.get("host")
+            resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
+            cypher: list[str] = []
+            params: dict[str, Any] = {"tags": tags or [], "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{abs(hash(json.dumps(ev, default=str)))%10**8}", "etype": etype, "raw": ev}
+            cypher.extend([
+                "MERGE (ev:EVENT {id: $evid})",
+                "SET ev.type = $etype, ev.raw = $raw, ev.tags = apoc.coll.toSet(coalesce(ev.tags, []) + $tags)",
+            ])
+            # Reuse same per-type builder as above (duplicated minimally)
+            # For brevity, handle main common types here
+            if etype == "SCAN":
+                scan_name = (data.get("name") or ev.get("name") or ev.get("id") or "").strip()
+                seeds = []
+                try:
+                    tgt = data.get("target") or {}
+                    seeds = tgt.get("seeds") or []
+                except Exception:
+                    seeds = []
+                current_seeds = list(seeds)
+                params.update({"scan_name": scan_name, "seeds": list(seeds)})
+                cypher += [
+                    "MERGE (sc:SCAN {name: $scan_name})",
+                    "SET sc.tags = apoc.coll.toSet(coalesce(sc.tags, []) + $tags)",
+                    "WITH sc, $evid AS evid, $seeds AS seeds",
+                    "MATCH (ev:EVENT {id: evid})",
+                    "MERGE (ev)-[:ABOUT]->(sc)",
+                ]
+                if seeds:
+                    cypher += [
+                        "UNWIND seeds AS sd",
+                        "MERGE (d:Domain {name: sd})",
+                        "MERGE (sc)-[:TARGETS]->(d)",
+                    ]
+            elif etype == "URL":
+                url = data if isinstance(data, str) else (data.get("url") or data.get("value") or ev.get("data"))
+                params.update({"url": url, "host": host})
+                cypher += [
+                    "MERGE (u:URL {value: $url})",
+                    "SET u.tags = apoc.coll.toSet(coalesce(u.tags, []) + $tags)",
+                    "WITH u MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(u)",
+                ]
+            # Execute
             if cypher:
                 list(neo4j_client.run("\n".join(cypher), params))
                 count += 1
