@@ -928,149 +928,17 @@ def _record_to_event_like(record: Any) -> dict | None:
 
 
 def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
-    """Import events/artifacts from a BBOT scan directory.
-    Returns number of records ingested.
+    """Import from a BBOT scan directory by reading output.json ONLY.
+    Returns number of records ingested. Raises FileNotFoundError if output.json is missing.
     """
     base = Path(scan_dir)
     if not base.is_dir():
         return 0
-    ingested = 0
-    # Candidate files to parse
-    candidates = [
-        "events.jsonl",
-        "events.json",
-        "artifacts.jsonl",
-        "artifacts.json",
-        "results.json",
-        "scan.json",
-        "graph.json",
-        # Common BBOT consolidated output
-        "output.json",
-        "output.csv",
-        # Simple text artifacts
-        "subdomains.txt",
-        "emails.txt",
-    ]
-    for name in candidates:
-        p = base / name
-        if not p.exists():
-            continue
-        try:
-            if p.name == "output.json":
-                ingested += ingest_output_json_file(str(p), default_domain=default_domain)
-                continue
-            if p.name in ("subdomains.txt", "emails.txt"):
-                with p.open("r", encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        val = line.strip()
-                        if not val:
-                            continue
-                        if p.name == "subdomains.txt":
-                            ev = {"type": "DNS_NAME", "data": {"name": val, "host": val, "domain": default_domain}}
-                        else:
-                            ev = {"type": "EMAIL_ADDRESS", "data": {"email": val, "value": val}}
-                        ingest_event(ev, default_domain=default_domain)
-                        ingested += 1
-            elif p.name == "output.csv":
-                with p.open("r", encoding="utf-8", errors="ignore") as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if not isinstance(row, dict):
-                            continue
-                        # Normalize row to event-like
-                        etype = row.get("type") or row.get("Type") or "UNKNOWN"
-                        data: dict[str, Any] = {}
-                        # Pass through common fields if exist
-                        for k in ("value","url","host","fqdn","domain","ip","addr","email","port","name","technology"):
-                            if row.get(k):
-                                data[k] = row[k]
-                        ev = _record_to_event_like({
-                            "type": etype,
-                            "data": data,
-                            "module": row.get("module") or row.get("Module"),
-                            "ts": row.get("ts") or row.get("Timestamp"),
-                            "id": row.get("id") or row.get("ID"),
-                        })
-                        if ev:
-                            ingest_event(ev, default_domain=default_domain)
-                            ingested += 1
-            elif p.suffix == ".jsonl":
-                with p.open("r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except Exception:
-                            continue
-                        ev = _record_to_event_like(rec)
-                        if ev:
-                            ingest_event(ev, default_domain=default_domain)
-                            ingested += 1
-            else:
-                txt = p.read_text(encoding="utf-8", errors="ignore")
-                parsed_bulk = False
-                try:
-                    obj = json.loads(txt)
-                    parsed_bulk = True
-                    items: list[Any] = []
-                    if isinstance(obj, list):
-                        items = obj
-                    elif isinstance(obj, dict):
-                        for key in ("events", "artifacts", "results", "items", "data"):
-                            if isinstance(obj.get(key), list):
-                                items = obj[key]
-                                break
-                        if not items:
-                            items = [obj]
-                    for rec in items:
-                        ev = _record_to_event_like(rec)
-                        if ev:
-                            ingest_event(ev, default_domain=default_domain)
-                            ingested += 1
-                except Exception:
-                    pass
-                # Fallback: treat as JSON lines stream
-                if not parsed_bulk:
-                    for line in txt.splitlines():
-                        line = line.strip()
-                        if not line or not line.startswith("{"):
-                            continue
-                        try:
-                            rec = json.loads(line)
-                        except Exception:
-                            continue
-                        ev = _record_to_event_like(rec)
-                        if ev:
-                            ingest_event(ev, default_domain=default_domain)
-                            ingested += 1
-        except Exception:
-            # Ignore file-level errors, proceed to next
-            continue
-    # Parse simple table files (e.g., asns-table-*.txt)
-    try:
-        for table_file in base.glob("*asns-table-*.txt"):
-            with table_file.open("r", encoding="utf-8", errors="ignore") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.lower().startswith("asn"):
-                        # likely a header
-                        continue
-                    # Try formats: "AS12345, Name" or "AS12345\tName" or "12345 Name"
-                    parts = [p for p in (line.replace("\t", ",").split(",")) if p.strip()]
-                    if not parts:
-                        continue
-                    asn_part = parts[0].strip()
-                    asn_num = asn_part.upper().lstrip("AS")
-                    asn_name = parts[1].strip() if len(parts) > 1 else None
-                    ev = _record_to_event_like({"type": "ASN", "data": {"asn": asn_num, "name": asn_name}})
-                    if ev:
-                        ingest_event(ev, default_domain=default_domain)
-                        ingested += 1
-    except Exception:
-        pass
-    return ingested
+    # Strict mode: only output.json is allowed
+    output_path = base / "output.json"
+    if not output_path.exists():
+        raise FileNotFoundError(f"output.json not found in scan dir: {scan_dir}")
+    return ingest_output_json_file(str(output_path), default_domain=default_domain)
 
 
 def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2, max_age_seconds: int = 900) -> int:
