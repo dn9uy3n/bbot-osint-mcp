@@ -492,7 +492,13 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
 
             cypher: list[str] = []
-            params: dict[str, Any] = {"tags": tags or [], "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{hash(line)}", "etype": etype, "raw": ev}
+            params: dict[str, Any] = {
+                "tags": tags or [],
+                "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{hash(line)}",
+                "etype": etype,
+                # Store raw event as JSON string (Neo4j property must be primitive/array)
+                "raw": json.dumps(ev, ensure_ascii=False, default=str),
+            }
 
             # Always create EVENT node first for every line
             cypher.extend([
@@ -858,7 +864,12 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             host = ev.get("host") or data.get("host")
             resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
             cypher: list[str] = []
-            params: dict[str, Any] = {"tags": tags or [], "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{abs(hash(json.dumps(ev, default=str)))%10**8}", "etype": etype, "raw": ev}
+            params: dict[str, Any] = {
+                "tags": tags or [],
+                "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{abs(hash(json.dumps(ev, default=str)))%10**8}",
+                "etype": etype,
+                "raw": json.dumps(ev, ensure_ascii=False, default=str),
+            }
             cypher.extend([
                 "MERGE (ev:EVENT {id: $evid})",
                 "SET ev.type = $etype, ev.raw = $raw, ev.tags = apoc.coll.toSet(coalesce(ev.tags, []) + $tags)",
