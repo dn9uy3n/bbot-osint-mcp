@@ -867,64 +867,7 @@ def cleanup_graph(now_epoch: int) -> dict:
 
 # --- BBOT scan directory importer (post-scan detailed results) ---
 
-def _record_to_event_like(record: Any) -> dict | None:
-    """Best-effort conversion of a BBOT record into our event shape.
-    Returns None if the record cannot be interpreted.
-    """
-    try:
-        if not isinstance(record, dict):
-            return None
-        # If it already looks like an event
-        if record.get("type") and (isinstance(record.get("data"), dict) or record.get("data") is None):
-            # Ensure data is dict
-            data = record.get("data") or {}
-            return {"type": record.get("type"), "module": record.get("module"), "ts": record.get("ts"), "id": record.get("id"), "data": data}
-
-        # Common artifact patterns: flatten into event-like structure
-        candidate: dict[str, Any] = {}
-        data: dict[str, Any] = {}
-
-        # Infer type from keys
-        if "fqdn" in record or "host" in record or "name" in record:
-            # DNS/Host-like
-            t = "DNS_NAME" if "name" in record or "fqdn" in record else "HOST"
-            data.update(record)
-            candidate = {"type": t, "data": data}
-        elif "ip" in record or "addr" in record:
-            data.update(record)
-            candidate = {"type": "IP_ADDRESS", "data": data}
-        elif "url" in record or (record.get("value") and isinstance(record.get("value"), str) and record.get("value").startswith("http")):
-            data.update(record)
-            candidate = {"type": "URL", "data": data}
-        elif "email" in record:
-            data.update(record)
-            candidate = {"type": "EMAIL_ADDRESS", "data": data}
-        elif "port" in record and ("host" in record or "fqdn" in record):
-            data.update(record)
-            candidate = {"type": "OPEN_TCP_PORT", "data": data}
-        elif "technology" in record or (record.get("type") == "technology"):
-            data.update(record)
-            tech_name = record.get("technology") or record.get("name")
-            if tech_name:
-                data["technology"] = tech_name
-            candidate = {"type": "TECHNOLOGY", "data": data}
-        elif "asn" in record or record.get("type") == "ASN":
-            data.update(record)
-            candidate = {"type": "ASN", "data": data}
-        elif record.get("severity") and record.get("id"):
-            # Likely a finding
-            data.update(record)
-            candidate = {"type": "FINDING", "data": data}
-        else:
-            return None
-
-        # Pass through module/ts/id if present
-        for k in ("module", "ts", "id"):
-            if k in record:
-                candidate[k] = record[k]
-        return candidate
-    except Exception:
-        return None
+# Legacy converter removed: strict importer only reads output.json per line
 
 
 def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
@@ -941,43 +884,7 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
     return ingest_output_json_file(str(output_path), default_domain=default_domain)
 
 
-def ingest_latest_scan_dirs(default_domain: str | None = None, max_dirs: int = 2, max_age_seconds: int = 900) -> int:
-    """Find the most recent BBOT scan directories and ingest from them.
-    Returns total records ingested.
-    """
-    # Default BBOT scans location inside container
-    candidate_roots = [
-        os.path.expanduser("~/.bbot/scans"),
-        "/root/.bbot/scans",
-        "/home/appuser/.bbot/scans",
-    ]
-    dirs: list[Path] = []
-    for r in candidate_roots:
-        root = Path(r)
-        if root.exists():
-            dirs.extend([d for d in root.iterdir() if d.is_dir()])
-    if not dirs:
-        return 0
-    # prefer dirs containing consolidated outputs
-    dirs = [d for d in dirs if (d / "output.json").exists() or (d / "output.csv").exists() or (d / "subdomains.txt").exists()]
-    dirs.sort(key=lambda d: max((d / "output.json").stat().st_mtime if (d / "output.json").exists() else d.stat().st_mtime,
-                                (d / "output.csv").stat().st_mtime if (d / "output.csv").exists() else d.stat().st_mtime,
-                                (d / "subdomains.txt").stat().st_mtime if (d / "subdomains.txt").exists() else d.stat().st_mtime),
-              reverse=True)
-    total = 0
-    now = int(Path("/").stat().st_mtime)  # cheap current mtime proxy
-    for d in dirs[:max_dirs]:
-        # skip very old dirs
-        try:
-            m = max((d / "output.json").stat().st_mtime if (d / "output.json").exists() else d.stat().st_mtime,
-                    (d / "output.csv").stat().st_mtime if (d / "output.csv").exists() else d.stat().st_mtime,
-                    (d / "subdomains.txt").stat().st_mtime if (d / "subdomains.txt").exists() else d.stat().st_mtime)
-        except Exception:
-            m = d.stat().st_mtime
-        if max_age_seconds > 0 and (now - m) > max_age_seconds:
-            continue
-        total += ingest_scan_dir(str(d), default_domain=default_domain)
-    return total
+
 
 
 def _get_scan_roots() -> list[Path]:
@@ -1022,79 +929,7 @@ def _is_sub_of_domain(domain: str, name: str) -> bool:
     return n == d or n.endswith("." + d)
 
 
-def find_scan_dirs_for_target(target: str, max_dirs: int = 2, max_age_seconds: int = 3600) -> list[Path]:
-    """Score and return likely scan directories for the given target domain."""
-    dirs: list[tuple[Path, int, float]] = []
-    for root in _get_scan_roots():
-        for d in root.iterdir():
-            if not d.is_dir():
-                continue
-            try:
-                # base recency
-                mtime = d.stat().st_mtime
-            except Exception:
-                continue
-            score = 0
-            # Prefer consolidated outputs
-            out_json = d / "output.json"
-            out_csv = d / "output.csv"
-            subs_txt = d / "subdomains.txt"
-            emails_txt = d / "emails.txt"
-            scan_log = d / "scan.log"
-            # Search for target string
-            if out_json.exists() and _file_contains_text(out_json, target):
-                score += 100
-                try:
-                    mtime = max(mtime, out_json.stat().st_mtime)
-                except Exception:
-                    pass
-            if scan_log.exists() and _file_contains_text(scan_log, target):
-                score += 80
-                try:
-                    mtime = max(mtime, scan_log.stat().st_mtime)
-                except Exception:
-                    pass
-            if out_csv.exists() and _file_contains_text(out_csv, target):
-                score += 50
-                try:
-                    mtime = max(mtime, out_csv.stat().st_mtime)
-                except Exception:
-                    pass
-            # subdomains: look for suffix match
-            if subs_txt.exists():
-                try:
-                    with subs_txt.open("r", encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            if _is_sub_of_domain(target, line.strip()):
-                                score += 60
-                                break
-                except Exception:
-                    pass
-                try:
-                    mtime = max(mtime, subs_txt.stat().st_mtime)
-                except Exception:
-                    pass
-            if emails_txt.exists() and _file_contains_text(emails_txt, "@" + target):
-                score += 20
-                try:
-                    mtime = max(mtime, emails_txt.stat().st_mtime)
-                except Exception:
-                    pass
-            # Penalize dirs with no indicative files
-            if score == 0 and not (out_json.exists() or out_csv.exists() or subs_txt.exists()):
-                continue
-            # Age filter
-            if max_age_seconds > 0:
-                try:
-                    now_m = max(Path("/").stat().st_mtime, mtime)
-                except Exception:
-                    now_m = mtime
-                if (now_m - mtime) > max_age_seconds:
-                    continue
-            dirs.append((d, score, mtime))
-    # sort by score desc, then mtime desc
-    dirs.sort(key=lambda x: (x[1], x[2]), reverse=True)
-    return [d for d, _, _ in dirs[:max_dirs]]
+# Heuristic target dir finder removed: importer relies on directory diff or exact name
 
 
 def find_scan_dirs_by_name(scan_name: str, max_dirs: int = 1, max_age_seconds: int = 7200) -> list[Path]:
@@ -1141,15 +976,5 @@ def ingest_dirs_by_scan_name(scan_name: str, default_domain: str | None = None, 
     return total, used
 
 
-def ingest_dirs_for_target(target: str, default_domain: str | None = None, max_dirs: int = 1, max_age_seconds: int = 3600) -> tuple[int, list[str]]:
-    """Find and ingest results from dirs most likely matching the given target.
-    Returns (ingested_count, used_dir_names).
-    """
-    selected = find_scan_dirs_for_target(target, max_dirs=max_dirs, max_age_seconds=max_age_seconds)
-    total = 0
-    used: list[str] = []
-    for d in selected:
-        used.append(str(d))
-        total += ingest_scan_dir(str(d), default_domain=default_domain)
-    return total, used
+# Target dir ingest removed (not used)
 
