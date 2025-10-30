@@ -36,7 +36,8 @@ Script sẽ:
 
 - [Hướng dẫn sử dụng API](docs/API_USAGE.md)
 - [Tích hợp Cursor MCP](docs/MCP_INTEGRATION.md)
-- [Neo4j Data Model](docs/NEO4J_MODEL.md)
+- [Mô hình dữ liệu (Data Model)](docs/DATA_MODEL.md)
+- [Importer (đọc output.json)](docs/IMPORTER.md)
 - [Giải thích Sleep Parameters](SLEEP_PARAMETERS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Quản lý & Gỡ cài đặt](docs/UNINSTALL.md)
@@ -645,10 +646,10 @@ Call MCP tool: osint.status {}
 ### Nodes
 
 - `Domain {name}`: Domain chính
-- `Host {fqdn, status, last_seen_ts, sources, ports}`: Subdomain/host
-- `IP {addr}`: Địa chỉ IP
-- `URL {value}`: URLs
-- `Email {value}`: Email addresses
+- `Host {name, status, last_seen_ts, sources, ports}`: Subdomain/host
+- `IP_ADDRESS {addr}`: Địa chỉ IP
+- `URL {value}`, `URL_UNVERIFIED {value}`: URLs
+- `EMAIL_ADDRESS {value}`: Email addresses
 - `DNS_NAME {name, last_seen_ts}`: DNS records từ BBOT
 - `OPEN_TCP_PORT {endpoint, port, host, last_seen_ts}`: Cổng mở (ví dụ: `example.com:443`)
 - `TECHNOLOGY {name}`: Công nghệ phát hiện được (ví dụ: `nginx`, `PHP`, `WordPress`)
@@ -658,11 +659,60 @@ Call MCP tool: osint.status {}
 ### Relationships
 
 - `(:Host)-[:PART_OF]->(:Domain)`: Host thuộc domain
-- `(:DNS_NAME)-[:RESOLVES_TO]->(:Host)`: DNS name resolve tới host
+- `(:DNS_NAME)-[:ON_HOST]->(:Host)`: DNS name thuộc host
 - `(:OPEN_TCP_PORT)-[:ON_HOST]->(:Host)`: Port mở trên host nào
 - `(:Host)-[:USES_TECH]->(:TECHNOLOGY)`: Host sử dụng công nghệ gì
-- `(:Event)-[:ABOUT]->(:Domain|:Host|:IP|:URL|:Email|:DNS_NAME|:OPEN_TCP_PORT|:TECHNOLOGY)`: Event về entity nào
+- `(:EVENT)-[:ABOUT]->(:Domain|:Host|:IP_ADDRESS|:URL|:URL_UNVERIFIED|:EMAIL_ADDRESS|:DNS_NAME|:OPEN_TCP_PORT|:TECHNOLOGY)`: Event về entity nào
 - `(:Event)-[:EMITTED_BY]->(:Module)`: Event từ module nào
+
+### Sơ đồ Mermaid
+
+```mermaid
+graph LR
+  subgraph Entities
+    D[DOMAIN]
+    H[HOST]
+    DN[DNS_NAME]
+    OP[OPEN_TCP_PORT]
+    U[URL]
+    UU[URL_UNVERIFIED]
+    EML[EMAIL_ADDRESS]
+    MA[MOBILE_APP]
+    TEC[TECHNOLOGY]
+    ASN[ASN]
+    FND[FINDING]
+    SB[STORAGE_BUCKET]
+    SOC[SOCIAL]
+    CR[CODE_REPOSITORY]
+    IP[IP_ADDRESS]
+    SC[SCAN]
+    EV[EVENT]
+  end
+
+  SC -- TARGETS --> D
+  EV -- ABOUT --> SC
+  DN -- ON_HOST --> H
+  OP -- ON_HOST --> H
+  U -- ON_HOST --> H
+  EML -- ON_HOST --> H
+  SB -- ON_HOST --> H
+  FND -- ON_HOST --> H
+  H -- PART_OF --> D
+  H -- USES_TECH --> TEC
+  U -- RESOLVES_TO --> IP
+  OP -- RESOLVES_TO --> IP
+  H -- RESOLVES_TO --> IP
+  FND -- RELATED_URL --> U
+  SB -- EXPOSED_AT --> U
+  MA -- OF_DOMAIN --> D
+  U -- OF_DOMAIN --> D
+  FND -- OF_DOMAIN --> D
+  SB -- OF_DOMAIN --> D
+  SOC -- OF_DOMAIN --> D
+  CR -- OF_DOMAIN --> D
+  ASN -- OF_DOMAIN --> D
+  IP -- OF_DOMAIN --> D
+```
 
 ### Truy vấn Neo4j
 
@@ -682,27 +732,28 @@ User: `neo4j`, Password: từ `secrets/neo4j_password`.
 // Tìm tất cả subdomains của evilcorp.com
 MATCH (h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
 WHERE h.status = "online"
-RETURN h.fqdn, h.last_seen_ts, h.ports
+RETURN h.name, h.last_seen_ts, h.ports
 ORDER BY h.last_seen_ts DESC
 
 // Tìm tất cả open ports của một domain
 MATCH (op:OPEN_TCP_PORT)-[:ON_HOST]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
-RETURN h.fqdn, op.port, op.last_seen_ts
+OPTIONAL MATCH (op)-[:RESOLVES_TO]->(i:IP_ADDRESS)
+RETURN h.name, op.port, collect(distinct i.addr) AS ips
 ORDER BY op.port
 
 // Tìm công nghệ được sử dụng
 MATCH (h:Host)-[:USES_TECH]->(t:TECHNOLOGY)
-WHERE h.fqdn CONTAINS "evilcorp.com"
-RETURN h.fqdn, collect(t.name) as technologies
+WHERE h.name CONTAINS "evilcorp.com"
+RETURN h.name, collect(t.name) as technologies
 
 // Tìm DNS records
-MATCH (dn:DNS_NAME)-[:RESOLVES_TO]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
-RETURN dn.name, h.fqdn, dn.last_seen_ts
+MATCH (dn:DNS_NAME)-[:ON_HOST]->(h:Host)-[:PART_OF]->(d:Domain {name: "evilcorp.com"})
+RETURN dn.name, h.name, dn.last_seen_ts
 ORDER BY dn.last_seen_ts DESC
 
 // Tìm events liên quan đến một host
-MATCH (ev:Event)-[:ABOUT]->(h:Host {fqdn: "www.evilcorp.com"})
-RETURN ev.type, ev.ts, ev.raw
+MATCH (ev:EVENT)-[:ABOUT]->(h:Host {name: "www.evilcorp.com"})
+RETURN ev.type, ev.raw
 ORDER BY ev.ts DESC
 LIMIT 50
 ```

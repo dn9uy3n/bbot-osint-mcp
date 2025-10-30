@@ -28,7 +28,7 @@ def query_subdomains(domain: str | None = None, host: str | None = None, online_
         where.append("d.name CONTAINS $domain")
         params["domain"] = domain
     if host:
-        where.append("h.fqdn CONTAINS $host")
+        where.append("h.name CONTAINS $host")
         params["host"] = host
     if online_only:
         where.append("h.status = 'online'")
@@ -37,7 +37,7 @@ def query_subdomains(domain: str | None = None, host: str | None = None, online_
     query = (
         "MATCH (h:Host)-[:PART_OF]->(d:Domain) "
         f"{where_clause} "
-        "RETURN d.name AS domain, h.fqdn AS host, h.status AS status, h.last_seen_ts AS last_seen_ts, h.sources AS sources, h.ports AS ports "
+        "RETURN d.name AS domain, h.name AS host, h.status AS status, h.last_seen_ts AS last_seen_ts, h.sources AS sources, h.ports AS ports "
         "ORDER BY h.last_seen_ts DESC NULLS LAST "
         "LIMIT $limit"
     )
@@ -48,7 +48,7 @@ def ensure_constraints() -> None:
     # Unique constraints for fast MERGE operations
     for stmt in [
         "CREATE CONSTRAINT domain_unique IF NOT EXISTS FOR (d:Domain) REQUIRE d.name IS UNIQUE",
-        "CREATE CONSTRAINT host_unique IF NOT EXISTS FOR (h:Host) REQUIRE h.fqdn IS UNIQUE",
+        "CREATE CONSTRAINT host_unique IF NOT EXISTS FOR (h:Host) REQUIRE h.name IS UNIQUE",
         "CREATE CONSTRAINT ip_unique IF NOT EXISTS FOR (i:IP) REQUIRE i.addr IS UNIQUE",
         "CREATE CONSTRAINT url_unique IF NOT EXISTS FOR (u:URL) REQUIRE u.value IS UNIQUE",
         "CREATE CONSTRAINT email_unique IF NOT EXISTS FOR (e:Email) REQUIRE e.value IS UNIQUE",
@@ -255,7 +255,7 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         ]
     if params["host"]:
         cypher += [
-            "MERGE (h:Host {fqdn: $host})",
+            "MERGE (h:Host {name: $host})",
             "SET h.status = coalesce($status, h.status), h.last_seen_ts = $ts, h.sources = coalesce(h.sources, []) + $sources",
             "MERGE (ev)-[:ABOUT]->(h)",
         ]
@@ -362,7 +362,7 @@ def ingest_event(event: dict[str, Any], default_domain: str | None = None) -> No
         if params.get("host"):
             cypher += [
                 "WITH $host AS fq, $resolved_ips AS rips",
-                "MATCH (h3:Host {fqdn: fq})",
+                "MATCH (h3:Host {name: fq})",
                 "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h3)-[:RESOLVES_TO]->(i)",
             ]
         # Link OPEN_TCP_PORT -> IP
@@ -446,7 +446,7 @@ def query_events(
         params["domain"] = domain
     if host:
         match.append("MATCH (ev)-[:ABOUT]->(h:Host)")
-        where.append("h.fqdn CONTAINS $host")
+        where.append("h.name CONTAINS $host")
         params["host"] = host
 
     query = (
@@ -569,19 +569,19 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH dn MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(dn)",
                 ])
                 if host_val:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (dn)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (dn)-[:ON_HOST]->(h)"])
                 # Per request, link HOST to IPs from resolved_hosts
                 if host_val and resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 # Link Host to Domain seeds if present
                 if current_seeds and host_val:
                     cypher.extend([
                         "WITH $host AS fq, $scan_seeds AS seeds",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
                     ])
 
@@ -598,7 +598,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH op MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(op)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (op)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (op)-[:ON_HOST]->(h)"])
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $endpoint AS ep, $resolved AS rips",
@@ -609,7 +609,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 if current_seeds and host:
                     cypher.extend([
                         "WITH $host AS fq, $scan_seeds AS seeds",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
                     ])
 
@@ -622,18 +622,18 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH t MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(t)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (h)-[:USES_TECH]->(t)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (h)-[:USES_TECH]->(t)"])
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 # Link Host to Domain seeds if present
                 if current_seeds and host:
                     cypher.extend([
                         "WITH $host AS fq, $scan_seeds AS seeds",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (h)-[:PART_OF]->(d)",
                     ])
 
@@ -646,18 +646,18 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH e MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(e)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (e)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (e)-[:ON_HOST]->(h)"])
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 # Link EMAIL to Domain seeds if present
                 if current_seeds:
                     cypher.extend([
                         "WITH $email AS evl, $scan_seeds AS seeds",
-                        "MATCH (e:EMAIL {value: evl})",
+                        "MATCH (e:EMAIL_ADDRESS {value: evl})",
                         "UNWIND seeds AS sd MERGE (d:Domain {name: sd}) MERGE (e)-[:OF_DOMAIN]->(d)",
                     ])
 
@@ -696,7 +696,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (u)-[:RESOLVES_TO]->(i)",
                     ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (u)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (u)-[:ON_HOST]->(h)"])
                 if current_seeds:
                     cypher.extend([
                         "WITH $url AS uv, $scan_seeds AS seeds",
@@ -722,11 +722,11 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (f)-[:RELATED_URL]->(u)"])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (f)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (f)-[:ON_HOST]->(h)"])
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 if current_seeds:
@@ -748,11 +748,11 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (sb)-[:EXPOSED_AT]->(u)"])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (sb)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (sb)-[:ON_HOST]->(h)"])
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 if current_seeds:
@@ -772,7 +772,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH pr MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(pr)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (pr)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (pr)-[:ON_HOST]->(h)"])
                 if port and host:
                     cypher.extend([
                         "WITH $host AS fq, $port AS p",
@@ -783,7 +783,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 if resolved_hosts:
                     cypher.extend([
                         "WITH $host AS fq, $resolved AS rips",
-                        "MATCH (h:Host {fqdn: fq})",
+                        "MATCH (h:Host {name: fq})",
                         "UNWIND rips AS rip MERGE (i:IP {addr: rip}) MERGE (h)-[:RESOLVES_TO]->(i)",
                     ])
                 if current_seeds:
@@ -802,7 +802,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH s MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(s)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (s)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (s)-[:ON_HOST]->(h)"])
                 if current_seeds:
                     cypher.extend([
                         "WITH $platform AS ph, $scan_seeds AS seeds",
@@ -819,7 +819,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                     "WITH cr MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(cr)",
                 ])
                 if host:
-                    cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (cr)-[:ON_HOST]->(h)"])
+                    cypher.extend(["MERGE (h:Host {name: $host})", "MERGE (cr)-[:ON_HOST]->(h)"])
                 if current_seeds and repo_url:
                     cypher.extend([
                         "WITH $repo_url AS ru, $scan_seeds AS seeds",

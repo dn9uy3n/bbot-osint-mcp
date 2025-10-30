@@ -2,7 +2,7 @@
 
 ### Nodes
 - DOMAIN {name}
-- HOST {fqdn, status?, last_seen_ts?, sources?, ports?}
+- HOST {name, status?, last_seen_ts?, sources?, ports?}
 - DNS_NAME {name, last_seen_ts?}
 - OPEN_TCP_PORT {endpoint, port, host?, last_seen_ts?}
 - URL {value}
@@ -64,5 +64,77 @@ RETURN h.fqdn, op.port, collect(distinct i.addr) AS ips
 MATCH (u:URL)-[:OF_DOMAIN]->(d:Domain {name:$domain})
 OPTIONAL MATCH (u)-[:RESOLVES_TO]->(i:IP_ADDRESS)
 RETURN u.value, collect(distinct i.addr) AS ips
+```
+
+### Mermaid overview
+
+```mermaid
+graph LR
+  subgraph Entities
+    D[DOMAIN]
+    H[HOST]
+    DN[DNS_NAME]
+    OP[OPEN_TCP_PORT]
+    U[URL]
+    UU[URL_UNVERIFIED]
+    EML[EMAIL_ADDRESS]
+    MA[MOBILE_APP]
+    TEC[TECHNOLOGY]
+    ASN[ASN]
+    FND[FINDING]
+    SB[STORAGE_BUCKET]
+    SOC[SOCIAL]
+    CR[CODE_REPOSITORY]
+    IP[IP_ADDRESS]
+    SC[SCAN]
+    EV[EVENT]
+  end
+
+  SC -- TARGETS --> D
+  EV -- ABOUT --> SC
+  DN -- ON_HOST --> H
+  OP -- ON_HOST --> H
+  U -- ON_HOST --> H
+  EML -- ON_HOST --> H
+  SB -- ON_HOST --> H
+  FND -- ON_HOST --> H
+  H -- PART_OF --> D
+  H -- USES_TECH --> TEC
+  U -- RESOLVES_TO --> IP
+  OP -- RESOLVES_TO --> IP
+  H -- RESOLVES_TO --> IP
+  FND -- RELATED_URL --> U
+  SB -- EXPOSED_AT --> U
+  MA -- OF_DOMAIN --> D
+  U -- OF_DOMAIN --> D
+  FND -- OF_DOMAIN --> D
+  SB -- OF_DOMAIN --> D
+  SOC -- OF_DOMAIN --> D
+  CR -- OF_DOMAIN --> D
+  ASN -- OF_DOMAIN --> D
+  IP -- OF_DOMAIN --> D
+```
+
+### Query examples
+
+```cypher
+// Hosts under a domain
+MATCH (h:Host)-[:PART_OF]->(d:Domain {name:$domain})
+RETURN h.name, h.ports
+
+// Ports and IPs
+MATCH (op:OPEN_TCP_PORT)-[:ON_HOST]->(h:Host)-[:PART_OF]->(d:Domain {name:$domain})
+OPTIONAL MATCH (op)-[:RESOLVES_TO]->(i:IP_ADDRESS)
+RETURN h.name, op.port, collect(distinct i.addr) AS ips
+
+// URLs and IPs
+MATCH (u:URL)-[:OF_DOMAIN]->(d:Domain {name:$domain})
+OPTIONAL MATCH (u)-[:RESOLVES_TO]->(i:IP_ADDRESS)
+RETURN u.value, collect(distinct i.addr) AS ips
+
+// Latest events
+MATCH (ev:EVENT)
+RETURN ev.type, ev.id
+ORDER BY ev.id DESC LIMIT 20
 ```
 

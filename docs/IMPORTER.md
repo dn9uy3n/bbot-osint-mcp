@@ -10,17 +10,17 @@ Nguyên tắc xử lý
 
 Mapping cốt lõi
 - SCAN: `(sc:SCAN {name: data.name})` + `(sc)-[:TARGETS]->(d:Domain {name: seed})`
-- DNS_NAME: `(dn:DNS_NAME {name: dns_children.NS[0] | fallback data/host})`, `(dn)-[:ON_HOST]->(h:Host {fqdn: host})`, `(h)-[:RESOLVES_TO]->(i:IP_ADDRESS {addr})` từ `resolved_hosts`
-- OPEN_TCP_PORT: `(op:OPEN_TCP_PORT {endpoint: host:port, port})`, `(op)-[:ON_HOST]->(h)`, `(op)-[:RESOLVES_TO]->(i)` từ `resolved_hosts`
-- TECHNOLOGY: `(t:TECHNOLOGY {name: data.technology})`, `(h)-[:USES_TECH]->(t)`, `(h)-[:RESOLVES_TO]->(i)` khi có
-- EMAIL_ADDRESS: `(e:EMAIL_ADDRESS {value: data|string})`, `(e)-[:ON_HOST]->(h)`
+- DNS_NAME: `(dn:DNS_NAME {name: dns_children.NS[0] | fallback data/host})`, `(dn)-[:ON_HOST]->(h:Host {name: host})`, `(h)-[:RESOLVES_TO]->(i:IP_ADDRESS {addr})` từ `resolved_hosts`
+- OPEN_TCP_PORT: `(op:OPEN_TCP_PORT {endpoint: host:port, port})`, `(op)-[:ON_HOST]->(h:Host {name: host})`, `(op)-[:RESOLVES_TO]->(i:IP_ADDRESS {addr})`
+- TECHNOLOGY: `(t:TECHNOLOGY {name: data.technology})`, `(h:Host {name: host})-[:USES_TECH]->(t)`, `(h)-[:RESOLVES_TO]->(i:IP_ADDRESS)` khi có
+- EMAIL_ADDRESS: `(e:EMAIL_ADDRESS {value: data|string})`, `(e)-[:ON_HOST]->(h:Host {name: host})`
 - MOBILE_APP: `(ma:MOBILE_APP {name: data.id|name})`, `(ma)-[:OF_DOMAIN]->(d)`; (tuỳ chọn) `(ma)-[:DOWNLOAD_URL]->(u:URL {value: data.url})`
-- URL: `(u:URL {value: data|string})`, `(u)-[:ON_HOST]->(h)`, `(u)-[:RESOLVES_TO]->(i)` từ `resolved_hosts`
+- URL: `(u:URL {value: data|string})`, `(u)-[:ON_HOST]->(h:Host {name: host})`, `(u)-[:RESOLVES_TO]->(i:IP_ADDRESS)` từ `resolved_hosts`
 - URL_UNVERIFIED: `(uu:URL_UNVERIFIED {value: data|string})`, `(uu)-[:ON_HOST]->(h)`
 - ASN: `(a:ASN {number: data|string (strip 'AS')})`, `(a)-[:OF_DOMAIN]->(d)`
-- FINDING: `(f:FINDING {id: data.description|title|name})`, `(f)-[:RELATED_URL]->(u)` nếu có, `(f)-[:ON_HOST]->(h)`, `(h)-[:RESOLVES_TO]->(i)`
-- STORAGE_BUCKET: `(sb:STORAGE_BUCKET {name: data.name})`, `(sb)-[:EXPOSED_AT]->(u)` nếu có, `(sb)-[:ON_HOST]->(h)`
-- PROTOCOL: `(pr:PROTOCOL {name: data.protocol})`, `(pr)-[:ON_HOST]->(h)`, `(pr)-[:ON_PORT]->(op)` (host:port), `(h)-[:RESOLVES_TO]->(i)`
+- FINDING: `(f:FINDING {id: data.description|title|name})`, `(f)-[:RELATED_URL]->(u)` nếu có, `(f)-[:ON_HOST]->(h:Host {name: host})`, `(h)-[:RESOLVES_TO]->(i:IP_ADDRESS)`
+- STORAGE_BUCKET: `(sb:STORAGE_BUCKET {name: data.name})`, `(sb)-[:EXPOSED_AT]->(u)` nếu có, `(sb)-[:ON_HOST]->(h:Host {name: host})`
+- PROTOCOL: `(pr:PROTOCOL {name: data.protocol})`, `(pr)-[:ON_HOST]->(h:Host {name: host})`, `(pr)-[:ON_PORT]->(op:OPEN_TCP_PORT {endpoint: host:port})`, `(h)-[:RESOLVES_TO]->(i:IP_ADDRESS)`
 - SOCIAL: `(s:SOCIAL {handle: data.platform|name})`, `(s)-[:OF_DOMAIN]->(d)`; (tuỳ chọn) `(s)-[:ON_HOST]->(h)`
 - CODE_REPOSITORY: `(cr:CODE_REPOSITORY {url: data.url})`, `(cr)-[:OF_DOMAIN]->(d)`; (tuỳ chọn) `(cr)-[:ON_HOST]->(h)`
 - IP_ADDRESS: `(i:IP_ADDRESS {addr: data|string})`, `(i)-[:OF_DOMAIN]->(d)`
