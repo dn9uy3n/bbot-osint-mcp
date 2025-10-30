@@ -483,10 +483,13 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 ev = json.loads(line)
             except Exception:
                 continue
+            if not isinstance(ev, dict):
+                continue
             parsed_any_line = True
 
             etype = (ev.get("type") or "").upper()
-            data = ev.get("data") or {}
+            raw_data = ev.get("data")
+            data = raw_data if isinstance(raw_data, dict) else {"value": raw_data} if raw_data is not None else {}
             tags = ev.get("tags") if isinstance(ev.get("tags"), list) else []
             host = ev.get("host") or data.get("host")
             resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
@@ -859,7 +862,8 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             if not isinstance(ev, dict):
                 continue
             etype = (ev.get("type") or "").upper()
-            data = ev.get("data") or {}
+            raw_data = ev.get("data")
+            data = raw_data if isinstance(raw_data, dict) else {"value": raw_data} if raw_data is not None else {}
             tags = ev.get("tags") if isinstance(ev.get("tags"), list) else []
             host = ev.get("host") or data.get("host")
             resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
