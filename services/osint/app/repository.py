@@ -490,7 +490,13 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             resolved_hosts = ev.get("resolved_hosts") if isinstance(ev.get("resolved_hosts"), list) else []
 
             cypher: list[str] = []
-            params: dict[str, Any] = {"tags": tags or []}
+            params: dict[str, Any] = {"tags": tags or [], "evid": ev.get("id") or ev.get("uuid") or f"{etype}:{hash(line)}", "etype": etype, "raw": ev}
+
+            # Always create EVENT node first for every line
+            cypher.extend([
+                "MERGE (ev:EVENT {id: $evid})",
+                "SET ev.type = $etype, ev.raw = $raw, ev.tags = apoc.coll.toSet(coalesce(ev.tags, []) + $tags)",
+            ])
 
             def merge_host_rel(var: str = "h") -> None:
                 nonlocal cypher
@@ -525,6 +531,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (sc:SCAN {name: $scan_name})",
                     "SET sc.tags = apoc.coll.toSet(coalesce(sc.tags, []) + $tags)",
+                    "WITH sc MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(sc)",
                 ])
                 if params.get("seeds"):
                     cypher.extend([
@@ -543,6 +550,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (dn:DNS_NAME {name: $dns_label})",
                     "SET dn.tags = apoc.coll.toSet(coalesce(dn.tags, []) + $tags)",
+                    "WITH dn MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(dn)",
                 ])
                 if host_val:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (dn)-[:ON_HOST]->(h)"])
@@ -571,6 +579,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (op:OPEN_TCP_PORT {endpoint: $endpoint})",
                     "SET op.port = $port, op.tags = apoc.coll.toSet(coalesce(op.tags, []) + $tags)",
+                    "WITH op MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(op)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (op)-[:ON_HOST]->(h)"])
@@ -594,6 +603,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (t:TECHNOLOGY {name: $tech})",
                     "SET t.tags = apoc.coll.toSet(coalesce(t.tags, []) + $tags)",
+                    "WITH t MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(t)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (h)-[:USES_TECH]->(t)"])
@@ -615,8 +625,9 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 email_val = data if isinstance(data, str) else (data.get("email") or data.get("value") or ev.get("data"))
                 params.update({"email": email_val, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
-                    "MERGE (e:EMAIL {value: $email})",
+                    "MERGE (e:EMAIL_ADDRESS {value: $email})",
                     "SET e.tags = apoc.coll.toSet(coalesce(e.tags, []) + $tags)",
+                    "WITH e MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(e)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (e)-[:ON_HOST]->(h)"])
@@ -642,6 +653,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (ma:MOBILE_APP {name: $app_id})",
                     "SET ma.tags = apoc.coll.toSet(coalesce(ma.tags, []) + $tags)",
+                    "WITH ma MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(ma)",
                 ])
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (ma)-[:DOWNLOAD_URL]->(u)"])
@@ -657,8 +669,9 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 url = data if isinstance(data, str) else (data.get("url") or data.get("value") or ev.get("data"))
                 params.update({"url": url, "host": host, "resolved": list(resolved_hosts), "scan_seeds": list(current_seeds)})
                 cypher.extend([
-                    "MERGE (u:URL {value: $url})",
+                    f"MERGE (u:{'URL_UNVERIFIED' if etype=='URL_UNVERIFIED' else 'URL'} {{value: $url}})",
                     "SET u.tags = apoc.coll.toSet(coalesce(u.tags, []) + $tags)",
+                    "WITH u MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(u)",
                 ])
                 if resolved_hosts:
                     cypher.extend([
@@ -678,7 +691,8 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             elif etype == "ASN":
                 asn_val = data if isinstance(data, str) else (data.get("asn") or data.get("number") or data.get("value"))
                 params.update({"asn": str(asn_val).upper().lstrip("AS") if asn_val is not None else None})
-                cypher.extend(["MERGE (a:ASN {number: $asn})", "SET a.tags = apoc.coll.toSet(coalesce(a.tags, []) + $tags)"])
+                cypher.extend(["MERGE (a:ASN {number: $asn})", "SET a.tags = apoc.coll.toSet(coalesce(a.tags, []) + $tags)",
+                               "WITH a MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(a)"])
 
             elif etype == "FINDING":
                 desc = (data.get("description") or data.get("title") or data.get("name"))
@@ -687,6 +701,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (f:FINDING {id: $desc})",
                     "SET f.tags = apoc.coll.toSet(coalesce(f.tags, []) + $tags)",
+                    "WITH f MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(f)",
                 ])
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (f)-[:RELATED_URL]->(u)"])
@@ -712,6 +727,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (sb:STORAGE_BUCKET {name: $bucket})",
                     "SET sb.tags = apoc.coll.toSet(coalesce(sb.tags, []) + $tags)",
+                    "WITH sb MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(sb)",
                 ])
                 if url:
                     cypher.extend(["MERGE (u:URL {value: $url})", "MERGE (sb)-[:EXPOSED_AT]->(u)"])
@@ -737,6 +753,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (pr:PROTOCOL {name: $proto})",
                     "SET pr.tags = apoc.coll.toSet(coalesce(pr.tags, []) + $tags)",
+                    "WITH pr MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(pr)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (pr)-[:ON_HOST]->(h)"])
@@ -766,6 +783,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (s:SOCIAL {handle: $platform})",
                     "SET s.tags = apoc.coll.toSet(coalesce(s.tags, []) + $tags)",
+                    "WITH s MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(s)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (s)-[:ON_HOST]->(h)"])
@@ -782,6 +800,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 cypher.extend([
                     "MERGE (cr:CODE_REPOSITORY {url: $repo_url})",
                     "SET cr.tags = apoc.coll.toSet(coalesce(cr.tags, []) + $tags)",
+                    "WITH cr MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(cr)",
                 ])
                 if host:
                     cypher.extend(["MERGE (h:Host {fqdn: $host})", "MERGE (cr)-[:ON_HOST]->(h)"])
@@ -795,7 +814,7 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
             elif etype == "IP_ADDRESS":
                 ip_val = data if isinstance(data, str) else (data.get("ip") or data.get("addr") or data.get("value"))
                 params.update({"ip": ip_val})
-                cypher.extend(["MERGE (i:IP {addr: $ip})"])  # Reuse IP label for main object
+                cypher.extend(["MERGE (i:IP_ADDRESS {addr: $ip})", "WITH i MATCH (ev:EVENT {id: $evid}) MERGE (ev)-[:ABOUT]->(i)"])
 
             else:
                 # Skip unknown types quietly
@@ -937,6 +956,9 @@ def ingest_scan_dir(scan_dir: str, default_domain: str | None = None) -> int:
         if not p.exists():
             continue
         try:
+            if p.name == "output.json":
+                ingested += ingest_output_json_file(str(p), default_domain=default_domain)
+                continue
             if p.name in ("subdomains.txt", "emails.txt"):
                 with p.open("r", encoding="utf-8", errors="ignore") as f:
                     for line in f:
