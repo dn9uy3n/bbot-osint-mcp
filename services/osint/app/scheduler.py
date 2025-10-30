@@ -74,19 +74,18 @@ class ContinuousScanner:
                     )
                     logger.info(f"Resolved presets={req.presets} flags={req.flags} for target={target}")
                     
-                    # Run scan
+                    # Run scan: do NOT ingest live stream; only detect new scan dirs
                     event_count = 0
                     scan_name: str | None = None
                     scan_start_ts = time.time()
                     before_dirs = {str(p) for p in list_scan_dirs()}
                     async for event in async_start_scan(req):
                         ev = _event_to_dict(event)
-                        # Try to capture scan name when SCAN event appears
+                        # Optionally capture scan name from first SCAN event (for fallback matching)
                         if not scan_name and isinstance(ev, dict):
                             try:
                                 if (ev.get("type") or "").upper() == "SCAN":
                                     data = ev.get("data") or {}
-                                    # Flexible field matching
                                     for k in ("scan_name","name","label","id","slug"):
                                         v = data.get(k) or ev.get(k)
                                         if isinstance(v, str) and v:
@@ -94,7 +93,7 @@ class ContinuousScanner:
                                             break
                             except Exception:
                                 pass
-                        ingest_event(ev, default_domain=target)
+                        # Do not ingest here; rely on output.json importer
                         event_count += 1
                     
                     total_events += event_count

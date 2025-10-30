@@ -40,3 +40,5 @@ scans/
 test.json
 test-templates.json
 extract.py
+parse_output.py
+planned.json
