@@ -23,6 +23,17 @@ async def token_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@mcp_app.get("/")
+async def mcp_root() -> dict[str, Any]:
+    """Root endpoint so HTTP-based MCP clients can perform a quick handshake."""
+    return {
+        "name": "bbot-osint-mcp",
+        "description": "HTTP MCP shim exposing read-only BBOT OSINT queries",
+        "tools_endpoint": "/mcp/tools",
+        "requires_token": bool(settings.api_token),
+    }
+
+
 @mcp_app.get("/tools/osint.query")
 async def mcp_query(domain: str | None = None, host: str | None = None, online_only: bool = False, limit: int = 50) -> dict[str, Any]:
     """Query hosts from Neo4j database"""
