@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    BBOT_NO_INSTALL_DEPS=1
+    BBOT_NO_INSTALL_DEPS=0
 
 WORKDIR /app
 
@@ -47,7 +47,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN pip install --no-cache-dir \
     python-Wappalyzer==0.3.1 \
     aiohttp==3.9.5 \
-    setuptools
+    setuptools \
+    httpx
 
 # Hint for gowitness headless chromium
 ENV CHROME_PATH=/usr/bin/chromium

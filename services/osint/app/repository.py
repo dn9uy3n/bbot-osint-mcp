@@ -38,7 +38,7 @@ def query_subdomains(domain: str | None = None, host: str | None = None, online_
         "MATCH (h:Host)-[:PART_OF]->(d:Domain) "
         f"{where_clause} "
         "RETURN d.name AS domain, h.name AS host, h.status AS status, h.last_seen_ts AS last_seen_ts, h.sources AS sources, h.ports AS ports "
-        "ORDER BY h.last_seen_ts DESC NULLS LAST "
+        "ORDER BY h.last_seen_ts DESC "
         "LIMIT $limit"
     )
     return neo4j_client.run(query, params)
