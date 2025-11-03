@@ -377,7 +377,7 @@ nano init_config.json
 
 ```json
 {
-  "targets": ["masterisehomes.com"],
+  "targets": ["acme.example"],
   "deployment_role": "worker",
   "central_api": {
     "url": "https://osint.example.com/ingest/output",

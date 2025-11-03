@@ -42,7 +42,7 @@ Ghi chú
 ```json
 {
   "scan_name": "diabolic_carlos",
-  "default_domain": "masterisehomes.com",
+  "default_domain": "acme.example",
   "encoding": "gzip",
   "payload_b64": "<base64 của output.json (gzip)>"
 }
@@ -56,7 +56,7 @@ python -m app.worker_ingest \
   --url https://central.example.com/ingest/output \
   --worker-id worker-1 \
   --worker-token <token> \
-  --domain masterisehomes.com \
+  --domain acme.example \
   --scan-name <scan>
 ```
 

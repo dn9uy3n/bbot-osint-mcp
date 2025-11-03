@@ -34,7 +34,7 @@ flowchart LR
 
    ```json
    {
-     "targets": ["masterisehomes.com"],
+    "targets": ["acme.example"],
      "deployment_role": "central",
      "scan_defaults": {
        "presets": ["subdomain-enum", "web-basic"],
@@ -65,7 +65,7 @@ flowchart LR
 
    ```json
    {
-     "targets": ["masterisehomes.com"],
+    "targets": ["acme.example"],
      "deployment_role": "worker",
      "central_api": {
        "url": "https://osint.example.com/ingest/output",
@@ -93,7 +93,7 @@ python -m app.worker_ingest \
   --url https://central.example.com/ingest/output \
   --worker-id worker-hcm \
   --worker-token <token> \
-  --domain masterisehomes.com \
+  --domain acme.example \
   --scan-name diabolic_carlos
 ```
 
