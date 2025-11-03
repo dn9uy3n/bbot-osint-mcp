@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 from .config import settings
+from .worker_config import load_worker_tokens_from_config
 from loguru import logger
 
 
@@ -40,6 +41,39 @@ def apply_init_config():
         settings.bbot_modules = bbot_modules
     if isinstance(bbot_disable, list):
         settings.bbot_disable_modules = [str(m) for m in bbot_disable]
+
+    # Worker tokens for distributed ingest
+    load_worker_tokens_from_config(cfg.get("workers"))
+
+    # Deployment role (central vs worker)
+    role = cfg.get("deployment_role") or cfg.get("role")
+    if isinstance(role, str) and role.strip():
+        settings.deployment_role = role.strip().lower()
+
+    # Central API (used when role == worker)
+    central_api = cfg.get("central_api")
+    if isinstance(central_api, dict):
+        url = central_api.get("url") or central_api.get("endpoint")
+        if isinstance(url, str) and url.strip():
+            settings.central_api_url = url.strip()
+        worker_id = central_api.get("worker_id") or central_api.get("id")
+        if isinstance(worker_id, str) and worker_id.strip():
+            settings.central_worker_id = worker_id.strip()
+        worker_token = central_api.get("worker_token") or central_api.get("token")
+        if isinstance(worker_token, str) and worker_token.strip():
+            settings.central_worker_token = worker_token.strip()
+        auto_upload = central_api.get("auto_upload")
+        if isinstance(auto_upload, bool):
+            settings.central_auto_upload = auto_upload
+        compress = central_api.get("compress")
+        if isinstance(compress, bool):
+            settings.central_upload_compress = compress
+        verify = central_api.get("verify_tls")
+        if isinstance(verify, bool):
+            settings.central_api_verify_tls = verify
+        timeout = central_api.get("timeout")
+        if isinstance(timeout, (int, float)) and timeout > 0:
+            settings.central_api_timeout = int(timeout)
 
     if isinstance(bbot_modules, dict) or isinstance(bbot_disable, list):
         try:

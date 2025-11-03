@@ -40,6 +40,18 @@ class Settings(BaseModel):
     bbot_modules: dict = {}
     bbot_disable_modules: list[str] = []
 
+    worker_tokens: dict[str, str] = {}
+
+    # Deployment role & worker upload (set via init_config.json)
+    deployment_role: str = os.getenv("DEPLOYMENT_ROLE", "central")
+    central_api_url: str | None = os.getenv("CENTRAL_API_URL")
+    central_api_verify_tls: bool = os.getenv("CENTRAL_API_VERIFY_TLS", "true").lower() == "true"
+    central_api_timeout: int = int(os.getenv("CENTRAL_API_TIMEOUT", "120"))
+    central_worker_id: str | None = os.getenv("CENTRAL_WORKER_ID")
+    central_worker_token: str | None = os.getenv("CENTRAL_WORKER_TOKEN")
+    central_auto_upload: bool = os.getenv("CENTRAL_AUTO_UPLOAD", "true").lower() == "true"
+    central_upload_compress: bool = os.getenv("CENTRAL_UPLOAD_COMPRESS", "true").lower() == "true"
+
 
 settings = Settings()
 

@@ -1,8 +1,10 @@
-from typing import Iterable, Any
+import contextlib
 import json
 import os
+import tempfile
 from pathlib import Path
-import csv
+
+from typing import Iterable, Any
 from .neo4j_client import neo4j_client
 from .models import SubdomainRecord
 from .config import settings
@@ -916,6 +918,17 @@ def ingest_output_json_file(file_path: str, default_domain: str | None = None) -
                 list(neo4j_client.run("\n".join(cypher), params))
                 count += 1
     return count
+
+
+def ingest_output_json_bytes(payload: bytes, default_domain: str | None = None) -> int:
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+        tmp.write(payload)
+        tmp_path = tmp.name
+    try:
+        return ingest_output_json_file(tmp_path, default_domain=default_domain)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp_path)
 
 
 def cleanup_graph(now_epoch: int) -> dict:

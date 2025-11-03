@@ -14,6 +14,7 @@ Continuous OSINT monitoring system based on BBOT with FastAPI, Neo4j for full da
 - [Cursor MCP Integration](docs/MCP_INTEGRATION.md)
 - [Data Model](docs/DATA_MODEL.md)
 - [Importer (output.json)](docs/IMPORTER.md)
+- [Distributed Workers (multi-VPS)](docs/DISTRIBUTED.md)
 - [Sleep Parameters Explained](SLEEP_PARAMETERS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Management & Uninstall Guide](docs/UNINSTALL.md)
@@ -35,6 +36,7 @@ A **continuous monitoring** system that automatically scans targets in cycles, s
 - **Automatic Cleanup**: Delete expired events, long-offline hosts, and orphan nodes after each cycle.
 - **Telegram Notifications**: Notification after each completed scan cycle.
 - **Centralized Configuration**: All configuration in `init_config.json` (targets, API keys, sleep times).
+- **Distributed Workers**: Multiple BBOT workers can push results through `/ingest/output` with per-worker tokens; workers can auto-upload immediately after each scan.
 
 ### Architecture
 
@@ -311,7 +313,12 @@ nano init_config.json
     "c99": { "api_key": ["YOUR_C99_KEY_1", "YOUR_C99_KEY_2"] }
   },
   "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-  "TELEGRAM_CHAT_ID": "-1001234567890"
+  "TELEGRAM_CHAT_ID": "-1001234567890",
+  "deployment_role": "central",
+  "workers": [
+    { "id": "worker-hcm", "token": "<long-random-token>" },
+    { "id": "worker-hn", "token": "<another-token>" }
+  ]
 }
 ```
 
@@ -329,6 +336,14 @@ nano init_config.json
 3. **TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID**: To receive notifications when scan completes.
    - Create bot: [@BotFather](https://t.me/botfather)
    - Get chat_id: [@userinfobot](https://t.me/userinfobot)
+
+4. **deployment_role**: Define the current host role.
+   - `central`: (default) runs Neo4j + API + local ingest.
+   - `worker`: skips Neo4j, auto-uploads `output.json` to the central host after each scan (if enabled).
+
+5. **workers**: Remote workers allowed to push aggregated results via `/ingest/output` (only required on central host).
+   - Each entry must contain `id` and a long random `token` (recommend ≥48 characters).
+   - Remove the list or leave empty to disable remote worker ingestion.
 
 **scan_defaults Configuration (Important!):**
 
@@ -351,6 +366,27 @@ nano init_config.json
     "allow_deadly": false,
     "target_sleep_seconds": 300,
     "cycle_sleep_seconds": 3600
+  },
+  "workers": [
+    { "id": "worker-hcm", "token": "<long-random-token>" }
+  ]
+}
+```
+
+**Example configuration for a Worker node (no Neo4j):**
+
+```json
+{
+  "targets": ["masterisehomes.com"],
+  "deployment_role": "worker",
+  "central_api": {
+    "url": "https://osint.example.com/ingest/output",
+    "worker_id": "worker-hcm",
+    "worker_token": "<long-random-token>",
+    "auto_upload": true,
+    "compress": true,
+    "verify_tls": true,
+    "timeout": 180
   }
 }
 ```
@@ -372,6 +408,36 @@ nano init_config.json
    - **Recommended**: 3600-7200s (1-2 hours) for frequent monitoring, 86400s (24 hours) for daily audit.
 
 📖 **Full details on 2 sleep parameters**: See [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+
+**workers** (optional when aggregating remote scanners):
+- Configure in `init_config.json` to whitelist worker IDs/tokens.
+- Worker uploads must send headers `X-Worker-Id` / `X-Worker-Token` matching this list.
+- Leave empty if all scans run on the central server.
+
+**central_api** (used only when `deployment_role = "worker"`):
+- `url`: central endpoint (base URL is accepted; `/ingest/output` is appended automatically if missing).
+- `worker_id` / `worker_token`: credentials issued by the central host.
+- `auto_upload`: `true` (default) → worker pushes data automatically after each scan; set `false` to rely on manual CLI uploads.
+- `compress`: `true` (default) → gzip + base64 before sending.
+- `verify_tls`: enable/disable TLS verification when connecting over HTTPS.
+- `timeout`: HTTP timeout (seconds) for the upload.
+
+### Typical Deployment Scenarios
+
+**1. Central-only (no workers)**
+- Keep `deployment_role` as `central` (default if omitted).
+- Remove the `workers` block or leave it empty to reject remote uploads.
+- The built-in scanner will process targets locally and ingest straight into Neo4j.
+
+**2. Central with remote workers**
+- Central host: set `deployment_role: "central"`, define each worker inside `workers` with unique `id/token` pairs.
+- Worker hosts: set `deployment_role: "worker"`, fill in `central_api` with the matching `worker_id/worker_token`, and keep `auto_upload` enabled to push `output.json` immediately after each target.
+- Restrict `/ingest/output` to trusted IPs via firewall; rotate or remove entries from `workers` to revoke access.
+
+**3. Ad-hoc / manual workers**
+- Configure `deployment_role: "worker"` but set `central_api.auto_upload = false`.
+- After each scan finishes, run `python -m app.worker_ingest --file ... --url ... --worker-id ... --worker-token ... --domain ...` whenever you choose to send results.
+- Useful for controlled pushes or in environments where automated uploads are not desired.
 
 #### Presets and Flags (Updated)
 - Supported presets: `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`.

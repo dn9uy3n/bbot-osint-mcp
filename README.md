@@ -38,6 +38,7 @@ Script sẽ:
 - [Tích hợp Cursor MCP](docs/MCP_INTEGRATION.md)
 - [Mô hình dữ liệu (Data Model)](docs/DATA_MODEL.md)
 - [Importer (đọc output.json)](docs/IMPORTER.md)
+- [Triển khai phân tán đa VPS](docs/DISTRIBUTED.md)
 - [Giải thích Sleep Parameters](SLEEP_PARAMETERS.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Quản lý & Gỡ cài đặt](docs/UNINSTALL.md)
@@ -60,6 +61,7 @@ Hệ thống **continuous monitoring** tự động quét targets theo chu kỳ,
 - **Automatic Cleanup**: Xóa events quá hạn, hosts offline lâu, và orphan nodes sau mỗi chu kỳ.
 - **Telegram Notifications**: Thông báo sau mỗi chu kỳ quét hoàn thành.
 - **Centralized Configuration**: Tất cả cấu hình trong `init_config.json` (targets, API keys, sleep times).
+- **Distributed Workers**: Hỗ trợ nhiều worker BBOT chạy trên các VPS khác nhau, gom dữ liệu qua endpoint `/ingest/output` với token riêng; worker có thể auto-upload ngay sau mỗi lần quét.
 
 ### Kiến trúc
 
@@ -315,7 +317,12 @@ nano init_config.json
     "c99": { "api_key": ["YOUR_C99_KEY_1", "YOUR_C99_KEY_2"] }
   },
   "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-  "TELEGRAM_CHAT_ID": "-1001234567890"
+  "TELEGRAM_CHAT_ID": "-1001234567890",
+  "deployment_role": "central",
+  "workers": [
+    { "id": "worker-hcm", "token": "<chuỗi-ngẫu-nhiên-64-bytes>" },
+    { "id": "worker-hn", "token": "<chuỗi-khác>" }
+  ]
 }
 ```
 
@@ -333,6 +340,14 @@ nano init_config.json
 3. **TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID**: Để nhận thông báo khi scan xong.
    - Tạo bot: [@BotFather](https://t.me/botfather)
    - Lấy chat_id: [@userinfobot](https://t.me/userinfobot)
+
+4. **deployment_role**: Xác định máy chủ hiện tại đóng vai trò gì.
+   - `central`: (mặc định) chạy Neo4j + API + ingest nội bộ.
+   - `worker`: không chạy Neo4j; sau mỗi lần quét sẽ upload thẳng `output.json` lên trung tâm (nếu bật auto upload).
+
+5. **workers**: Danh sách worker được phép upload dữ liệu qua `/ingest/output` (chỉ cần trên máy chủ trung tâm).
+   - Mỗi phần tử chứa `id` và `token` (chuỗi bí mật dài, ví dụ 64 ký tự hex).
+   - Để tạm thời vô hiệu hóa worker, xoá phần tử tương ứng hoặc để mảng rỗng.
 
 **Cấu hình scan_defaults (Quan trọng!):**
 
@@ -355,6 +370,27 @@ nano init_config.json
     "allow_deadly": false,
     "target_sleep_seconds": 300,
     "cycle_sleep_seconds": 3600
+  },
+  "workers": [
+    { "id": "worker-hcm", "token": "<chuỗi-ngẫu-nhiên-64-bytes>" }
+  ]
+}
+```
+
+**Ví dụ cấu hình cho Worker (không chạy Neo4j):**
+
+```json
+{
+  "targets": ["masterisehomes.com"],
+  "deployment_role": "worker",
+  "central_api": {
+    "url": "https://osint.example.com/ingest/output",
+    "worker_id": "worker-hcm",
+    "worker_token": "<chuỗi-ngẫu-nhiên-64-bytes>",
+    "auto_upload": true,
+    "compress": true,
+    "verify_tls": true,
+    "timeout": 180
   }
 }
 ```
@@ -376,6 +412,36 @@ nano init_config.json
    - **Khuyến nghị**: 3600-7200s (1-2 giờ) cho monitoring thường xuyên, 86400s (24 giờ) cho daily audit.
 
 📖 **Chi tiết đầy đủ về 2 tham số sleep**: Xem file [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+
+**workers** (tuỳ chọn cho triển khai phân tán):
+- Cấu hình tại `init_config.json` để xác định các worker hợp lệ.
+- Worker khi gọi `POST /ingest/output` phải gửi header `X-Worker-Id` / `X-Worker-Token` khớp với mục này.
+- Không cần cấu hình nếu chỉ quét tại máy chủ trung tâm.
+
+**central_api** (chỉ dùng khi `deployment_role = "worker"`):
+- `url`: endpoint trung tâm (có thể là domain gốc, script sẽ tự nối `/ingest/output`).
+- `worker_id` / `worker_token`: thông tin xác thực do máy chủ trung tâm cấp.
+- `auto_upload`: `true` (default) → worker tự đẩy dữ liệu sau mỗi lần quét; đặt `false` nếu muốn tự chạy CLI thủ công.
+- `compress`: `true` (default) → gzip + base64 trước khi gửi.
+- `verify_tls`: bật kiểm tra chứng chỉ khi kết nối HTTPS.
+- `timeout`: timeout (giây) cho yêu cầu upload.
+
+### Kịch bản cấu hình điển hình
+
+**1. Chỉ dùng máy chủ trung tâm (không có worker)**
+- Giữ `deployment_role` là `central` (mặc định nếu không khai báo).
+- Bỏ hẳn khóa `workers` hoặc để mảng rỗng nếu không muốn chấp nhận upload từ bên ngoài.
+- Scanner nội bộ sẽ quét các target trong `targets`, import trực tiếp vào Neo4j.
+
+**2. Trung tâm + nhiều worker**
+- Máy trung tâm: `deployment_role: "central"`, khai báo danh sách `workers` với `id/token` riêng cho từng worker.
+- Worker: `deployment_role: "worker"`, cấu hình `central_api` bằng đúng `worker_id/worker_token` tương ứng, bật `auto_upload` để sau mỗi target sẽ tự gọi `/ingest/output`.
+- Đảm bảo firewall chỉ cho phép IP worker gọi endpoint trung tâm; token bị lộ có thể xoá khỏi `workers` để vô hiệu.
+
+**3. Worker tạm thời / gửi thủ công**
+- `deployment_role: "worker"`, nhưng đặt `central_api.auto_upload = false`.
+- Sau khi scan hoàn tất, chạy CLI: `python -m app.worker_ingest --file ... --url ... --worker-id ... --worker-token ... --domain ...` để đẩy dữ liệu bất cứ lúc nào.
+- Phù hợp khi cần kiểm soát quy trình gửi hoặc khi worker đang ở môi trường hạn chế.
 
 #### Preset & Flag (Cập nhật)
 - Preset hỗ trợ: `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`.

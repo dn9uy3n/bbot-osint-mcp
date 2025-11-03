@@ -33,3 +33,34 @@ Ghi chú
 - Dùng MERGE cho tất cả node/quan hệ; tags được hợp nhất: `tags = apoc.coll.toSet(coalesce(tags, []) + $tags)`.
 - Constraints đã thêm cho nhiều label để đảm bảo MERGE nhanh và không trùng.
 
+## Ingest từ Worker Từ Xa
+
+- API trung tâm cung cấp endpoint `POST /ingest/output`.
+- Bảo vệ bằng header `X-Worker-Id` và `X-Worker-Token` (khai báo trong `init_config.json` mục `workers`).
+- Payload JSON:
+
+```json
+{
+  "scan_name": "diabolic_carlos",
+  "default_domain": "masterisehomes.com",
+  "encoding": "gzip",
+  "payload_b64": "<base64 của output.json (gzip)>"
+}
+```
+
+- Mỗi worker nên dùng script `python -m app.worker_ingest`:
+
+```bash
+python -m app.worker_ingest \
+  --file /root/.bbot/scans/<scan>/output.json \
+  --url https://central.example.com/ingest/output \
+  --worker-id worker-1 \
+  --worker-token <token> \
+  --domain masterisehomes.com \
+  --scan-name <scan>
+```
+
+- Server sẽ trả về `{ "imported": <records>, "worker": "worker-1" }`. Dữ liệu được xử lý như ingest nội bộ, đảm bảo tránh trùng lặp.
+- Khi `deployment_role = "worker"` và `central_api.auto_upload=true`, worker sẽ tự động đọc file `output.json` mới sinh sau mỗi lần quét và gọi endpoint này.
+- Nếu chạy ở chế độ trung tâm thuần (`deployment_role = "central"` hoặc không khai báo), importer xử lý trực tiếp `output.json` trên chính máy chủ và không cần cấu hình `central_api`.
+

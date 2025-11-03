@@ -41,3 +41,10 @@ class EventsQueryRequest(BaseModel):
     limit: int = 200
 
 
+class OutputIngestRequest(BaseModel):
+    scan_name: Optional[str] = None
+    default_domain: Optional[str] = None
+    encoding: Literal["plain", "gzip"] = "plain"
+    payload_b64: str
+
+

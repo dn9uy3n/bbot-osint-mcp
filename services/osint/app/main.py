@@ -1,8 +1,18 @@
-from fastapi import FastAPI, Depends, Request
+import base64
+import gzip
+
+from fastapi import FastAPI, Depends, Request, Header, HTTPException
 from fastapi.responses import ORJSONResponse
+from loguru import logger
+
 from .auth import require_token
-from .models import QueryRequest, EventsQueryRequest
-from .repository import query_subdomains, ensure_constraints, query_events
+from .models import QueryRequest, EventsQueryRequest, OutputIngestRequest
+from .repository import (
+    query_subdomains,
+    ensure_constraints,
+    query_events,
+    ingest_output_json_bytes,
+)
 from .config import settings
 from .config_loader import apply_init_config
 from .scheduler import scanner
@@ -54,11 +64,15 @@ app.mount("/mcp", mcp_app)
 @app.on_event("startup")
 async def _on_startup():
     apply_init_config()
-    # Ensure constraints, but don't crash if DB not ready yet
-    try:
-        ensure_constraints()
-    except Exception:
-        pass
+    role = (settings.deployment_role or "central").lower()
+    if role == "central":
+        # Ensure constraints, but don't crash if DB not ready yet
+        try:
+            ensure_constraints()
+        except Exception as exc:
+            logger.warning("Failed to ensure Neo4j constraints during startup: {}", exc)
+    else:
+        logger.info("deployment_role='{}' – skipping Neo4j constraint bootstrap", role)
     # Start continuous scanner in background
     import asyncio
     asyncio.create_task(scanner.run_forever())
@@ -67,6 +81,25 @@ async def _on_startup():
 @app.on_event("shutdown")
 async def _on_shutdown():
     await scanner.stop()
+
+
+def require_worker(
+    worker_id: str | None = Header(default=None, alias="X-Worker-Id"),
+    worker_token: str | None = Header(default=None, alias="X-Worker-Token"),
+):
+    tokens = settings.worker_tokens or {}
+    if not worker_id or not worker_token or tokens.get(worker_id) != worker_token:
+        raise HTTPException(status_code=401, detail="Unauthorized worker")
+    return worker_id
+
+
+@app.post("/ingest/output")
+async def ingest_output(req: OutputIngestRequest, worker_id: str = Depends(require_worker)):
+    data = base64.b64decode(req.payload_b64)
+    if req.encoding == "gzip":
+        data = gzip.decompress(data)
+    imported = ingest_output_json_bytes(data, default_domain=req.default_domain)
+    return {"imported": imported, "worker": worker_id}
 
 
 
