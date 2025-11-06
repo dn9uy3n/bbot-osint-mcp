@@ -1,4 +1,4 @@
-## BBOT OSINT Continuous Monitoring Stack (Docker)
+## 1. BBOT OSINT Continuous Monitoring Stack (Docker)
 
 > **Vietnamese version:** [README.md](README.md)
 
@@ -19,11 +19,11 @@ Continuous OSINT monitoring system based on BBOT with FastAPI, Neo4j for full da
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Management & Uninstall Guide](docs/UNINSTALL.md)
 
-### Project Description
+### 1.1 Project Description
 
 A **continuous monitoring** system that automatically scans targets in cycles, stores full data in Neo4j (DNS records, open ports, technologies, events), with API and MCP for querying. Optimized for 24/7 operation with low concurrency, reducing risk of being blocked.
 
-### Key Features
+### 1.2 Key Features
 
 - **Automatic Continuous Scanning**: Automatically scans all configured targets in cycles, no manual triggering needed.
 - **2 Types of Sleep Time**:
@@ -38,7 +38,7 @@ A **continuous monitoring** system that automatically scans targets in cycles, s
 - **Centralized Configuration**: All configuration in `init_config.json` (targets, API keys, sleep times).
 - **Distributed Workers**: Multiple BBOT workers can push results through `/ingest/output` with per-worker tokens; workers can auto-upload immediately after each scan.
 
-### Architecture
+### 1.3 Architecture
 
 - `docker-compose.yml`: Neo4j and OSINT service (FastAPI + MCP).
 - `init_config.json`: input configuration (targets, API keys, Telegram, scan parameters).
@@ -164,9 +164,9 @@ graph LR
 
 ---
 
-## Step-by-Step Installation Guide
+## 2. Step-by-Step Installation Guide
 
-### Quick Install (Recommended)
+### 2.1 Quick Install (Recommended)
 
 ```bash
 cd /opt
@@ -187,49 +187,42 @@ Verify:
 sudo docker logs -f bbot_osint
 ```
 
-### Requirements
+### 2.2 Common Preparation (all nodes)
 
-- VPS running Ubuntu 22.04 or 24.04
-- Domain with A-record pointing to VPS IP (e.g., `osint.example.com`)
-- Root or sudo access
-- Ports 80 and 443 open on firewall
+#### 2.2.1 Infrastructure requirements
 
-### Step 1: Update System and Install Docker
+- Ubuntu 22.04/24.04 VPS (≥2 vCPU, 4 GB RAM recommended)
+- `sudo` access
+- Central node needs a domain pointing to the server (e.g., `osint.example.com`)
+- Open ports according to role:
+  - Central: 80/443 for reverse proxy, 8000 optional for direct API
+  - Worker: only SSH/API ports required (e.g., 22 and 8000)
 
-SSH into your VPS and run:
+#### 2.2.2 Update OS and install Docker
 
 ```bash
-# Update system
 sudo apt-get update -y && sudo apt-get upgrade -y
-
-# Install required packages
 sudo apt-get install -y ca-certificates curl gnupg lsb-release git
 
-# Add Docker GPG key
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
   | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-# Add Docker repository
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Install Docker and Docker Compose
 sudo apt-get update -y
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
   docker-buildx-plugin docker-compose-plugin
 
-# Enable Docker on boot
 sudo systemctl enable --now docker
-
-# Verify installation
 sudo docker --version
 sudo docker compose version
 ```
 
-### Step 2: Clone Repository
+#### 2.2.3 Clone repository
 
 ```bash
 cd /opt
@@ -238,83 +231,64 @@ cd bbot-osint-mcp
 sudo chown -R $USER:$USER .
 ```
 
-### Step 3: Generate Strong Secrets
+#### 2.2.4 Generate secrets
 
 ```bash
-# Run secret generation script
 bash scripts/init-secrets.sh
-
-# View generated credentials (API_TOKEN, Neo4j password)
 cat secrets/credentials.txt
 ```
 
-**Note**: Save the `API_TOKEN` from this file for API and MCP calls.
+Keep `API_TOKEN` and `NEO4J_PASSWORD` for later steps.
 
-### Step 4: Create Environment Configuration
+### 2.3 Deploy the central node (with domain)
+
+#### 2.3.1 Create `.env` for central
 
 ```bash
-# Copy example file
 cp .env.example .env
-
-# Edit .env
 nano .env
 ```
 
-Fill in values:
+Required entries:
 
 ```env
-# Domain and email for Let's Encrypt
 LE_DOMAIN=osint.example.com
 LE_EMAIL=admin@example.com
 PUBLIC_BASE_URL=https://osint.example.com
-
-# Neo4j (password from secrets/neo4j_password)
 NEO4J_USERNAME=neo4j
-
-# Rate limit and concurrency
 RATE_LIMIT_PER_MINUTE=120
 MAX_CONCURRENT_SCANS=2
-
-# Cleanup policy
 CLEANUP_ENABLED=true
 EVENT_RETENTION_DAYS=30
 OFFLINE_HOST_RETENTION_DAYS=30
 ORPHAN_CLEANUP_ENABLED=true
-
-# Telegram (optional, can leave empty and fill in init_config.json)
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
 ```
 
-### Step 5: Configure init_config.json
+Docker secrets provide `API_TOKEN` and `NEO4J_PASSWORD` automatically. Add Telegram values if you want alerts.
 
-This file contains scan inputs and BBOT service API keys.
+#### 2.3.2 Prepare `init_config.json` for central
 
 ```bash
-# Copy example file
 cp init_config.json.example init_config.json
-
-# Edit configuration
 nano init_config.json
 ```
 
-**Detailed Structure:**
-
 ```json
 {
-  "targets": [
-    "evilcorp.com",
-    "target2.com"
-  ],
+  "targets": ["evilcorp.com", "target2.com"],
+  "deployment_role": "central",
+  "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": ["safe"],
+    "max_workers": 2,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
+  },
   "bbot_modules": {
     "securitytrails": { "api_key": "YOUR_SECURITYTRAILS_KEY" },
     "shodan_dns": { "api_key": "YOUR_SHODAN_KEY" },
-    "virustotal": { "api_key": "YOUR_VIRUSTOTAL_KEY" },
-    "c99": { "api_key": ["YOUR_C99_KEY_1", "YOUR_C99_KEY_2"] }
+    "virustotal": { "api_key": "YOUR_VIRUSTOTAL_KEY" }
   },
-  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-  "TELEGRAM_CHAT_ID": "-1001234567890",
-  "deployment_role": "central",
   "workers": [
     { "id": "worker-hcm", "token": "<long-random-token>" },
     { "id": "worker-hn", "token": "<another-token>" }
@@ -322,63 +296,66 @@ nano init_config.json
 }
 ```
 
-**Detailed Explanation:**
+- Each worker token should be ≥64 characters (hex/base64).
+- Remove an entry to revoke a worker, then `docker compose restart osint`.
 
-1. **targets**: Default target domain list used by the continuous scanner.
+#### 2.3.3 Open firewall & start the stack
 
-2. **bbot_modules**: API keys for BBOT modules:
-   - `securitytrails`: Find subdomains via SecurityTrails
-   - `shodan_dns`: DNS enumeration via Shodan
-   - `virustotal`: Find subdomains and info via VirusTotal
-   - `c99`: Multiple OSINT sources (supports multiple keys)
-   - See more modules: [BBOT Modules](https://www.blacklanternsecurity.com/bbot/scanning/configuration/)
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 22/tcp
+sudo ufw allow 8000/tcp comment 'bbot-osint API (optional)'
+sudo ufw enable
+sudo ufw status
 
-3. **TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID**: To receive notifications when scan completes.
-   - Create bot: [@BotFather](https://t.me/botfather)
-   - Get chat_id: [@userinfobot](https://t.me/userinfobot)
-
-4. **deployment_role**: Define the current host role.
-   - `central`: (default) runs Neo4j + API + local ingest.
-   - `worker`: skips Neo4j, auto-uploads `output.json` to the central host after each scan (if enabled).
-
-5. **workers**: Remote workers allowed to push aggregated results via `/ingest/output` (only required on central host).
-   - Each entry must contain `id` and a long random `token` (recommend ≥48 characters).
-   - Remove the list or leave empty to disable remote worker ingestion.
-
-**scan_defaults Configuration (Important!):**
-
-```json
-{
-  "targets": ["evilcorp.com", "target2.com"],
-  "bbot_modules": {
-    "securitytrails": { "api_key": "YOUR_KEY" }
-  },
-  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF...",
-  "TELEGRAM_CHAT_ID": "-1001234567890",
-  
-  "scan_defaults": {
-    "presets": ["subdomain-enum"],
-    "flags": ["safe"],
-    "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "target_sleep_seconds": 300,
-    "cycle_sleep_seconds": 3600
-  },
-  "workers": [
-    { "id": "worker-hcm", "token": "<long-random-token>" }
-  ]
-}
+sudo docker compose up -d --build
+sudo docker logs -f bbot_caddy
 ```
 
-**Example configuration for a Worker node (no Neo4j):**
+Wait for `certificate obtained successfully` from Caddy to confirm HTTPS.
+
+#### 2.3.4 Smoke-test the central API
+
+```bash
+API_TOKEN=$(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')
+
+curl -s -H "X-API-Token: $API_TOKEN" https://osint.example.com/healthz
+curl -s -H "X-API-Token: $API_TOKEN" https://osint.example.com/status
+```
+
+Monitor scanner logs:
+
+```bash
+sudo docker logs -f bbot_osint
+```
+
+### 2.4 Deploy worker nodes (no domain required)
+
+#### 2.4.1 Prepare a minimal `.env`
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+- Leave `LE_DOMAIN` and `LE_EMAIL` blank or comment them out.
+- Set `PUBLIC_BASE_URL=http://127.0.0.1:8000` (internal only) if you need callbacks.
+- Keep rate-limit/cleanup values so the scheduler behaves consistently.
+
+#### 2.4.2 Configure `init_config.json` for workers
 
 ```json
 {
   "targets": ["acme.example"],
   "deployment_role": "worker",
+  "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": ["safe"],
+    "max_workers": 2,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
+  },
   "central_api": {
     "url": "https://osint.example.com/ingest/output",
     "worker_id": "worker-hcm",
@@ -391,38 +368,100 @@ nano init_config.json
 }
 ```
 
-**Key Parameters Explained:**
+Set `auto_upload` to `false` when you prefer manual CLI pushes.
 
-1. **targets**: List of all targets to be scanned automatically. Scanner will loop through each target in order.
+#### 2.4.3 Start worker container
 
-2. **target_sleep_seconds** (default 300 = 5 minutes):
-   - Time to **rest between each target** within same cycle.
-   - Example: Scan target1 → sleep 5 min → Scan target2 → sleep 5 min → Scan target3
-   - **Purpose**: Avoid continuous scanning of multiple targets that attracts attention, reduce blocking risk.
-   - **Recommended**: 300-600s (5-10 minutes) for production.
+Workers only need the `osint` service:
 
-3. **cycle_sleep_seconds** (default 3600 = 1 hour):
-   - Time to **rest after scanning ALL targets** before starting new cycle.
-   - Example: [Scan all targets + cleanup] → sleep 1 hour → [Scan all targets again...]
-   - **Purpose**: Give API keys and system a "rest", avoid rate limits.
-   - **Recommended**: 3600-7200s (1-2 hours) for frequent monitoring, 86400s (24 hours) for daily audit.
+```bash
+sudo docker compose up -d --build --no-deps osint
+sudo docker logs -f bbot_osint
+```
 
-📖 **Full details on 2 sleep parameters**: See [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+Apply resource limits if needed:
 
-**workers** (optional when aggregating remote scanners):
-- Configure in `init_config.json` to whitelist worker IDs/tokens.
-- Worker uploads must send headers `X-Worker-Id` / `X-Worker-Token` matching this list.
-- Leave empty if all scans run on the central server.
+```bash
+sudo docker update --cpus 1.5 --memory 2g bbot_osint
+```
 
-**central_api** (used only when `deployment_role = "worker"`):
-- `url`: central endpoint (base URL is accepted; `/ingest/output` is appended automatically if missing).
-- `worker_id` / `worker_token`: credentials issued by the central host.
-- `auto_upload`: `true` (default) → worker pushes data automatically after each scan; set `false` to rely on manual CLI uploads.
-- `compress`: `true` (default) → gzip + base64 before sending.
-- `verify_tls`: enable/disable TLS verification when connecting over HTTPS.
-- `timeout`: HTTP timeout (seconds) for the upload.
+#### 2.4.4 Verify uploads from workers
 
-### Typical Deployment Scenarios
+Look for log entries such as:
+
+```
+[INFO] Uploaded 4373 records for acme.example from new scan dirs: [...]
+```
+
+On the central host you should see matching `Imported N records` entries tagged with the worker ID.
+
+### 2.5 Critical scan parameters
+
+1. **targets**: list of domains processed in order.
+2. **target_sleep_seconds** (default 300): pause between targets.
+3. **cycle_sleep_seconds** (default 3600): pause between full scan cycles.
+
+📖 Details: [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+
+**workers** (central only): define allowed worker IDs/tokens in `init_config.json`.
+
+**central_api** (worker only): define endpoint, credentials, TLS/timeout behaviour.
+
+### 2.6 Typical deployment scenarios
+
+**1. Central-only (no workers)**
+- Keep `deployment_role` as `central` (default if omitted).
+- Remove or empty the `workers` block to reject remote uploads.
+- The built-in scanner runs locally and ingests straight into Neo4j.
+
+**2. Central with managed workers**
+- Central: `deployment_role: "central"`, define each worker in `workers` with unique `id/token`.
+- Worker: `deployment_role: "worker"`, configure `central_api` with matching credentials and keep `auto_upload` enabled.
+- Restrict `/ingest/output` to worker IPs via firewall; rotate/remove tokens to revoke access.
+
+**3. Ad-hoc / manual workers**
+- `deployment_role: "worker"`, but set `central_api.auto_upload = false`.
+- After each scan, run `python -m app.worker_ingest --file ... --url ... --worker-id ... --worker-token ... --domain ...` when you decide to push data.
+- Useful for low-trust environments or manual review before ingesting.
+
+### 2.7 Presets and flags (updated)
+- Supported presets: `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`.
+- Supported flags: `safe`, `active`.
+- Invalid presets fall back to `subdomain-enum`.
+- Invalid flags are silently dropped.
+- The image ships with Node.js, JRE, OpenSSL and common Python deps so heavy modules (retirejs, fingerprintx, etc.) can install remaining packages at runtime (container runs as root).
+
+### 2.8 Disable modules via `init_config.json`
+Disable unwanted modules (e.g. gowitness screenshots) directly:
+
+```json
+"bbot_disable_modules": ["gowitness"]
+```
+
+### 2.9 Monitor scan progress
+
+Once the service starts, the continuous scanner runs automatically on both central and worker nodes:
+
+```bash
+sudo docker logs -f bbot_osint
+sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
+```
+
+Sample output:
+
+```
+[INFO] === Starting scan cycle at 2025-10-27 14:30:00 ===
+[INFO] [1/2] Scanning target: evilcorp.com
+[INFO] ✓ Target evilcorp.com completed: 1247 events
+[INFO] Sleeping 300s before next target...
+[INFO] [2/2] Scanning target: target2.com
+[INFO] ✓ Target target2.com completed: 892 events
+[INFO] Running cleanup...
+[INFO] === Cycle completed in 1534s, total events: 2139 ===
+[INFO] Sleeping 3600s until next cycle...
+```
+
+Telegram notifications summarize each completed cycle when configured.
 
 **1. Central-only (no workers)**
 - Keep `deployment_role` as `central` (default if omitted).
@@ -521,7 +560,7 @@ Username: `neo4j`; Password: from `secrets/neo4j_password`.
 
 ---
 
-## Detailed Cleanup Explanation
+## 3. Detailed Cleanup Explanation
 
 ### How Does Cleanup Work?
 
@@ -575,7 +614,7 @@ Scan 2 (day 35):
 
 ---
 
-## API Usage
+## 4. API Usage
 
 ### Main Endpoints
 
@@ -633,7 +672,7 @@ curl -X POST "https://osint.example.com/upsert" \
 
 ---
 
-## Cursor Integration (MCP Client)
+## 5. Cursor Integration (MCP Client)
 
 ### Step 1: Install MCP in Cursor
 
@@ -682,7 +721,7 @@ Presets: supported values are `subdomain-enum`, `spider`, `email-enum`, `web-bas
 
 ---
 
-## Neo4j Data Model
+## 6. Neo4j Data Model
 
 ### Nodes
 
@@ -769,7 +808,7 @@ LIMIT 50
 
 ---
 
-## Security
+## 7. Security
 
 ### Applied Security Measures
 
@@ -796,7 +835,7 @@ sudo docker compose exec neo4j neo4j-admin database dump neo4j \
 
 ---
 
-## Management and Maintenance
+## 8. Management and Maintenance
 
 ### Pause to Edit Config
 
@@ -871,7 +910,7 @@ cp secrets/credentials.txt ~/backup-credentials.txt
 
 ---
 
-## Uninstall
+## 9. Uninstall
 
 See detailed guide: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
 
@@ -899,7 +938,7 @@ Script provides 3 options:
 
 ---
 
-## Troubleshooting
+## 10. Troubleshooting
 
 ### 1. DNS inside containers fails (Temporary failure in name resolution)
 
@@ -976,7 +1015,7 @@ print(stats)
 
 ---
 
-## Operational Tips
+## 11. Operational Tips
 
 1. **View realtime logs:**
 ```bash

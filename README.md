@@ -1,4 +1,4 @@
-## BBOT OSINT Continuous Monitoring Stack (Docker)
+## 1. BBOT OSINT Continuous Monitoring Stack (Docker)
 
 > **English version:** [README_EN.md](README_EN.md)
 
@@ -11,7 +11,7 @@ Hệ thống giám sát OSINT liên tục dựa trên BBOT với FastAPI, Neo4j 
 - **[📝 Hướng dẫn viết init_config.json](docs/INIT_CONFIG_GUIDE.md)** ⭐
 - [Hướng dẫn cài đặt chi tiết](docs/INSTALLATION.md)
   - Cài đặt nhanh: chạy `./scripts/quick-install.sh` (thiết lập DNS Docker, tạo thư mục runtime, sinh secrets, build & up)
-### Cài đặt nhanh (Quick Install)
+### 1.1 Cài đặt nhanh (Quick Install)
 
 ```bash
 cd /opt
@@ -43,11 +43,11 @@ Script sẽ:
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Quản lý & Gỡ cài đặt](docs/UNINSTALL.md)
 
-### Mô tả dự án
+### 1.2 Mô tả dự án
 
 Hệ thống **continuous monitoring** tự động quét targets theo chu kỳ, lưu dữ liệu đầy đủ vào Neo4j (DNS records, open ports, technologies, events), với API và MCP để query. Tối ưu để chạy 24/7 với ít luồng, giảm nguy cơ bị chặn.
 
-### Tính năng chính
+### 1.3 Tính năng chính
 
 - **Automatic Continuous Scanning**: Tự động quét tất cả targets theo chu kỳ được cấu hình, không cần trigger thủ công.
 - **2 loại Sleep Time**:
@@ -63,7 +63,7 @@ Hệ thống **continuous monitoring** tự động quét targets theo chu kỳ,
 - **Centralized Configuration**: Tất cả cấu hình trong `init_config.json` (targets, API keys, sleep times).
 - **Distributed Workers**: Hỗ trợ nhiều worker BBOT chạy trên các VPS khác nhau, gom dữ liệu qua endpoint `/ingest/output` với token riêng; worker có thể auto-upload ngay sau mỗi lần quét.
 
-### Kiến trúc
+### 1.4 Kiến trúc
 
 - `docker-compose.yml`: Neo4j và service OSINT (FastAPI + MCP).
 - `init_config.json`: cấu hình đầu vào (targets, API keys, Telegram, tham số scan).
@@ -189,51 +189,44 @@ graph LR
 
 ---
 
-## Hướng dẫn cài đặt từ đầu (Step-by-Step)
+## 2. Hướng dẫn cài đặt từ đầu (Step-by-Step)
 
-### Yêu cầu
+### 2.1 Chuẩn bị chung (áp dụng cho mọi node)
 
-- VPS chạy Ubuntu 22.04 hoặc 24.04
-- Domain đã trỏ A-record về IP VPS (ví dụ: `osint.example.com`)
-- Quyền root hoặc sudo
-- Mở cổng 80 và 443 trên firewall
+#### 2.1.1 Yêu cầu hạ tầng
 
-### Bước 1: Cập nhật hệ thống và cài Docker
+- VPS Ubuntu 22.04/24.04 (tối thiểu 2 vCPU, 4 GB RAM khuyến nghị)
+- Quyền `sudo`
+- Máy chủ trung tâm cần domain đã trỏ A-record về IP (ví dụ: `osint.example.com`)
+- Cổng mạng mở theo vai trò:
+  - Central: 80/443 (reverse proxy) và 8000 (tùy chọn nếu truy cập trực tiếp API)
+  - Worker: chỉ cần 22/8000 hoặc port nội bộ tùy chính sách
 
-SSH vào VPS và chạy:
+#### 2.1.2 Cập nhật hệ thống và cài Docker
 
 ```bash
-# Cập nhật hệ thống
 sudo apt-get update -y && sudo apt-get upgrade -y
-
-# Cài các package cần thiết
 sudo apt-get install -y ca-certificates curl gnupg lsb-release git
 
-# Thêm Docker GPG key
 sudo install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
   | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-# Thêm Docker repository
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-# Cài Docker và Docker Compose
 sudo apt-get update -y
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
   docker-buildx-plugin docker-compose-plugin
 
-# Bật Docker tự khởi động
 sudo systemctl enable --now docker
-
-# Kiểm tra Docker
 sudo docker --version
 sudo docker compose version
 ```
 
-### Bước 2: Clone repository
+#### 2.1.3 Clone repository
 
 ```bash
 cd /opt
@@ -242,83 +235,65 @@ cd bbot-osint-mcp
 sudo chown -R $USER:$USER .
 ```
 
-### Bước 3: Sinh secrets mạnh
+#### 2.1.4 Sinh secrets mạnh
 
 ```bash
-# Chạy script sinh secrets
 bash scripts/init-secrets.sh
-
-# Xem thông tin đã sinh (API_TOKEN, Neo4j password)
 cat secrets/credentials.txt
 ```
 
-**Lưu ý**: Ghi nhớ `API_TOKEN` trong file này để dùng khi gọi API và MCP.
+Lưu lại `API_TOKEN` và `NEO4J_PASSWORD` để cấu hình ở các bước tiếp theo.
 
-### Bước 4: Tạo file cấu hình môi trường
+### 2.2 Triển khai trung tâm (central, có domain)
+
+#### 2.2.1 Tạo file `.env` cho central
 
 ```bash
-# Copy file mẫu
 cp .env.example .env
-
-# Chỉnh sửa .env
 nano .env
 ```
 
-Điền các giá trị:
+Các biến bắt buộc:
 
 ```env
-# Domain và email cho Let's Encrypt
 LE_DOMAIN=osint.example.com
 LE_EMAIL=admin@example.com
 PUBLIC_BASE_URL=https://osint.example.com
-
-# Neo4j (password sẽ dùng từ secrets/neo4j_password)
 NEO4J_USERNAME=neo4j
-
-# Giới hạn rate và concurrency
 RATE_LIMIT_PER_MINUTE=120
 MAX_CONCURRENT_SCANS=2
-
-# Cleanup policy
 CLEANUP_ENABLED=true
 EVENT_RETENTION_DAYS=30
 OFFLINE_HOST_RETENTION_DAYS=30
 ORPHAN_CLEANUP_ENABLED=true
-
-# Telegram (tùy chọn, có thể để trống và điền vào init_config.json)
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
 ```
 
-### Bước 5: Cấu hình init_config.json
+- `API_TOKEN` và `NEO4J_PASSWORD` sẽ được Docker secrets tự đọc từ thư mục `secrets/`.
+- Có thể thêm `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` nếu muốn nhận thông báo.
 
-File này chứa đầu vào cho scan và API keys của các dịch vụ BBOT.
+#### 2.2.2 Cấu hình `init_config.json` cho central
 
 ```bash
-# Copy file mẫu
 cp init_config.json.example init_config.json
-
-# Chỉnh sửa
 nano init_config.json
 ```
 
-**Cấu trúc chi tiết:**
-
 ```json
 {
-  "targets": [
-    "evilcorp.com",
-    "target2.com"
-  ],
+  "targets": ["evilcorp.com", "target2.com"],
+  "deployment_role": "central",
+  "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": ["safe"],
+    "max_workers": 2,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
+  },
   "bbot_modules": {
     "securitytrails": { "api_key": "YOUR_SECURITYTRAILS_KEY" },
     "shodan_dns": { "api_key": "YOUR_SHODAN_KEY" },
-    "virustotal": { "api_key": "YOUR_VIRUSTOTAL_KEY" },
-    "c99": { "api_key": ["YOUR_C99_KEY_1", "YOUR_C99_KEY_2"] }
+    "virustotal": { "api_key": "YOUR_VIRUSTOTAL_KEY" }
   },
-  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
-  "TELEGRAM_CHAT_ID": "-1001234567890",
-  "deployment_role": "central",
   "workers": [
     { "id": "worker-hcm", "token": "<chuỗi-ngẫu-nhiên-64-bytes>" },
     { "id": "worker-hn", "token": "<chuỗi-khác>" }
@@ -326,63 +301,67 @@ nano init_config.json
 }
 ```
 
-**Giải thích chi tiết:**
+- `workers` là danh sách cho phép upload từ các worker.
+- Token nên ≥64 ký tự (hex/base64). Khi thu hồi quyền, chỉ cần xóa entry tương ứng rồi `docker compose restart osint`.
 
-1. **targets**: Danh sách domain mục tiêu mặc định cho scanner tự động.
+#### 2.2.3 Khởi động stack central & mở firewall
 
-2. **bbot_modules**: API keys cho các module BBOT:
-   - `securitytrails`: Tìm subdomain qua SecurityTrails
-   - `shodan_dns`: DNS enumeration qua Shodan
-   - `virustotal`: Tìm subdomain và thông tin qua VirusTotal
-   - `c99`: Nhiều nguồn OSINT (hỗ trợ nhiều key)
-   - Xem thêm modules: [BBOT Modules](https://www.blacklanternsecurity.com/bbot/scanning/configuration/)
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 22/tcp
+sudo ufw allow 8000/tcp comment 'bbot-osint API (tùy chọn)'
+sudo ufw enable
+sudo ufw status
 
-3. **TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID**: Để nhận thông báo khi scan xong.
-   - Tạo bot: [@BotFather](https://t.me/botfather)
-   - Lấy chat_id: [@userinfobot](https://t.me/userinfobot)
-
-4. **deployment_role**: Xác định máy chủ hiện tại đóng vai trò gì.
-   - `central`: (mặc định) chạy Neo4j + API + ingest nội bộ.
-   - `worker`: không chạy Neo4j; sau mỗi lần quét sẽ upload thẳng `output.json` lên trung tâm (nếu bật auto upload).
-
-5. **workers**: Danh sách worker được phép upload dữ liệu qua `/ingest/output` (chỉ cần trên máy chủ trung tâm).
-   - Mỗi phần tử chứa `id` và `token` (chuỗi bí mật dài, ví dụ 64 ký tự hex).
-   - Để tạm thời vô hiệu hóa worker, xoá phần tử tương ứng hoặc để mảng rỗng.
-
-**Cấu hình scan_defaults (Quan trọng!):**
-
-```json
-{
-  "targets": ["evilcorp.com", "target2.com"],
-  "bbot_modules": {
-    "securitytrails": { "api_key": "YOUR_KEY" }
-  },
-  "TELEGRAM_BOT_TOKEN": "123456:ABC-DEF...",
-  "TELEGRAM_CHAT_ID": "-1001234567890",
-  
-  "scan_defaults": {
-    "presets": ["subdomain-enum"],
-    "flags": ["safe"],
-    "max_workers": 2,
-    "spider_depth": 2,
-    "spider_distance": 1,
-    "spider_links_per_page": 10,
-    "allow_deadly": false,
-    "target_sleep_seconds": 300,
-    "cycle_sleep_seconds": 3600
-  },
-  "workers": [
-    { "id": "worker-hcm", "token": "<chuỗi-ngẫu-nhiên-64-bytes>" }
-  ]
-}
+sudo docker compose up -d --build
+sudo docker logs -f bbot_caddy
 ```
 
-**Ví dụ cấu hình cho Worker (không chạy Neo4j):**
+- Caddy sẽ tự xin chứng chỉ Let's Encrypt cho `LE_DOMAIN`.
+- Đợi log `certificate obtained successfully` để xác nhận HTTPS hoạt động.
+
+#### 2.2.4 Kiểm tra dịch vụ trung tâm
+
+```bash
+API_TOKEN=$(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')
+
+curl -s -H "X-API-Token: $API_TOKEN" https://osint.example.com/healthz
+curl -s -H "X-API-Token: $API_TOKEN" https://osint.example.com/status
+```
+
+Ngoài ra có thể theo dõi tiến trình quét:
+
+```bash
+sudo docker logs -f bbot_osint
+```
+
+### 2.3 Triển khai worker (không cần domain)
+
+#### 2.3.1 Chuẩn bị `.env` tối giản
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+- Để trống `LE_DOMAIN` và `LE_EMAIL` hoặc comment hai dòng này.
+- `PUBLIC_BASE_URL` có thể để `http://127.0.0.1:8000` (chỉ phục vụ nội bộ).
+- Giữ nguyên các thông số giới hạn (rate limit, cleanup) để scheduler hoạt động.
+
+#### 2.3.2 Cấu hình `init_config.json` cho worker
 
 ```json
 {
   "targets": ["acme.example"],
   "deployment_role": "worker",
+  "scan_defaults": {
+    "presets": ["subdomain-enum"],
+    "flags": ["safe"],
+    "max_workers": 2,
+    "target_sleep_seconds": 300,
+    "cycle_sleep_seconds": 3600
+  },
   "central_api": {
     "url": "https://osint.example.com/ingest/output",
     "worker_id": "worker-hcm",
@@ -395,38 +374,44 @@ nano init_config.json
 }
 ```
 
-**Giải thích các tham số quan trọng:**
+- `central_api.url` có thể dùng domain hoặc IP reverse proxy trung tâm.
+- Khi cần upload thủ công, đặt `auto_upload` thành `false` rồi dùng CLI `python -m app.worker_ingest ...`.
 
-1. **targets**: Danh sách tất cả targets sẽ được quét tự động. Scanner sẽ lặp qua từng target theo thứ tự.
+#### 2.3.3 Khởi chạy container worker
 
-2. **target_sleep_seconds** (mặc định 300 = 5 phút):
-   - Thời gian **nghỉ giữa mỗi target** trong cùng một chu kỳ.
-   - Ví dụ: Scan target1 → sleep 5 phút → Scan target2 → sleep 5 phút → Scan target3
-   - **Mục đích**: Tránh quét liên tục nhiều targets gây chú ý, giảm nguy cơ block.
-   - **Khuyến nghị**: 300-600s (5-10 phút) cho production.
+Worker chỉ cần dịch vụ `osint`:
 
-3. **cycle_sleep_seconds** (mặc định 3600 = 1 giờ):
-   - Thời gian **nghỉ sau khi quét xong TẤT CẢ targets** trước khi bắt đầu chu kỳ mới.
-   - Ví dụ: [Quét all targets + cleanup] → sleep 1 giờ → [Quét all targets lại...]
-   - **Mục đích**: Cho API keys và hệ thống "rest", tránh rate limit.
-   - **Khuyến nghị**: 3600-7200s (1-2 giờ) cho monitoring thường xuyên, 86400s (24 giờ) cho daily audit.
+```bash
+sudo docker compose up -d --build --no-deps osint
+sudo docker logs -f bbot_osint
+```
 
-📖 **Chi tiết đầy đủ về 2 tham số sleep**: Xem file [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+- Các service `neo4j` và `proxy` không cần chạy trên worker.
+- Nếu muốn hạn chế tài nguyên: `sudo docker update --cpus 1.5 --memory 2g bbot_osint`.
 
-**workers** (tuỳ chọn cho triển khai phân tán):
-- Cấu hình tại `init_config.json` để xác định các worker hợp lệ.
-- Worker khi gọi `POST /ingest/output` phải gửi header `X-Worker-Id` / `X-Worker-Token` khớp với mục này.
-- Không cần cấu hình nếu chỉ quét tại máy chủ trung tâm.
+#### 2.3.4 Xác nhận upload thành công
 
-**central_api** (chỉ dùng khi `deployment_role = "worker"`):
-- `url`: endpoint trung tâm (có thể là domain gốc, script sẽ tự nối `/ingest/output`).
-- `worker_id` / `worker_token`: thông tin xác thực do máy chủ trung tâm cấp.
-- `auto_upload`: `true` (default) → worker tự đẩy dữ liệu sau mỗi lần quét; đặt `false` nếu muốn tự chạy CLI thủ công.
-- `compress`: `true` (default) → gzip + base64 trước khi gửi.
-- `verify_tls`: bật kiểm tra chứng chỉ khi kết nối HTTPS.
-- `timeout`: timeout (giây) cho yêu cầu upload.
+Trong log `bbot_osint` sẽ xuất hiện dòng:
 
-### Kịch bản cấu hình điển hình
+```
+[INFO] Uploaded 4373 records for acme.example from new scan dirs: [...]
+```
+
+Trên trung tâm kiểm tra log `bbot_osint` để thấy `Imported N records` cho `worker_id` tương ứng.
+
+### 2.4 Các tham số scan quan trọng
+
+1. **targets**: Danh sách target quét tự động.
+2. **target_sleep_seconds** (mặc định 300): nghỉ giữa các target trong cùng chu kỳ.
+3. **cycle_sleep_seconds** (mặc định 3600): nghỉ sau khi hoàn thành toàn bộ danh sách.
+
+📖 Xem thêm: [SLEEP_PARAMETERS.md](SLEEP_PARAMETERS.md)
+
+**workers** (chỉ cho trung tâm): cấu hình danh sách được phép upload bằng `init_config.json`.
+
+**central_api** (chỉ cho worker): xác định endpoint, credential và hành vi upload.
+
+### 2.5 Kịch bản cấu hình điển hình
 
 **1. Chỉ dùng máy chủ trung tâm (không có worker)**
 - Giữ `deployment_role` là `central` (mặc định nếu không khai báo).
@@ -443,79 +428,25 @@ nano init_config.json
 - Sau khi scan hoàn tất, chạy CLI: `python -m app.worker_ingest --file ... --url ... --worker-id ... --worker-token ... --domain ...` để đẩy dữ liệu bất cứ lúc nào.
 - Phù hợp khi cần kiểm soát quy trình gửi hoặc khi worker đang ở môi trường hạn chế.
 
-#### Preset & Flag (Cập nhật)
+### 2.6 Preset & Flag (Cập nhật)
 - Preset hỗ trợ: `subdomain-enum`, `spider`, `email-enum`, `web-basic`, `cloud-enum`.
 - Flag hỗ trợ: `safe`, `active`.
 - Preset không hợp lệ sẽ bị bỏ qua và mặc định `subdomain-enum`.
 - Flag không hợp lệ sẽ bị loại bỏ tự động.
 - Image đã cài sẵn Node.js/JRE/openssl và một số Python deps phổ biến để hỗ trợ modules nặng; container chạy root để cho phép cài deps bổ sung khi cần.
 
-#### Vô hiệu hóa module từ init_config.json
+### 2.7 Vô hiệu hóa module từ `init_config.json`
 Có thể tắt các module không cần (ví dụ gowitness trên server không cần screenshot):
 ```json
 "bbot_disable_modules": ["gowitness"]
 ```
 
-### Bước 6: Kiểm tra DNS và Firewall
+### 2.8 Theo dõi quá trình scan
+
+Continuous scanner tự động bắt đầu khi service khởi động (central và worker). Theo dõi logs:
 
 ```bash
-# Kiểm tra DNS đã trỏ đúng
-dig +short osint.example.com
-# Phải trả về IP VPS của bạn
-
-# Kiểm tra firewall (Ubuntu UFW)
-# BẮT BUỘC khi dùng reverse proxy (Caddy): mở 80,443
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 22/tcp
-
-# Tuỳ chọn: nếu bạn truy cập trực tiếp API/MCP qua IP:8000 (không qua domain/Caddy)
-# thì cần mở thêm 8000/tcp. Lưu ý: API yêu cầu X-API-Token, nhưng cổng sẽ public.
-sudo ufw allow 8000/tcp comment 'bbot-osint API/MCP'
-
-sudo ufw enable
-sudo ufw status
-```
-
-### Bước 7: Khởi chạy stack
-
-```bash
-# Build và start containers
-sudo docker compose up -d --build
-
-# Theo dõi logs
-sudo docker logs -f bbot_caddy
-```
-
-**Caddy sẽ tự động:**
-- Xin chứng chỉ từ Let's Encrypt
-- Cấu hình HTTPS tự động
-- Redirect HTTP → HTTPS
-
-Khi thấy log `certificate obtained successfully` là thành công.
-
-### Bước 8: Kiểm tra dịch vụ
-
-```bash
-# Lấy API_TOKEN
-API_TOKEN=$(grep '^API_TOKEN:' secrets/credentials.txt | awk '{print $2}')
-
-# Test healthcheck
-curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/healthz"
-# Kết quả: {"status":"ok","scanner_running":true,"targets":["evilcorp.com"]}
-
-# Kiểm tra trạng thái scanner
-curl -s -H "X-API-Token: $API_TOKEN" "https://osint.example.com/status"
-```
-
-### Bước 9: Theo dõi quá trình scan
-
-Continuous scanner tự động bắt đầu khi service khởi động. Theo dõi logs:
-
-```bash
-# Xem logs của OSINT service
 sudo docker logs -f bbot_osint
-
 # Filter chỉ xem scanner logs
 sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
 ```
@@ -537,7 +468,7 @@ sudo docker logs -f bbot_osint 2>&1 | grep -E "Scanning|Sleep|Cycle"
 
 ---
 
-## Giải thích chi tiết về Cleanup (Dọn dẹp)
+## 3. Giải thích chi tiết về Cleanup (Dọn dẹp)
 
 ### Cleanup hoạt động như thế nào?
 
@@ -591,7 +522,7 @@ Scan lần 2 (ngày 35):
 
 ---
 
-## Sử dụng API
+## 4. Sử dụng API
 
 ### Các endpoint chính
 
@@ -652,7 +583,7 @@ curl -X POST "https://osint.example.com/events/query" \
 
 ---
 
-## Tích hợp vào Cursor (MCP Client)
+## 5. Tích hợp vào Cursor (MCP Client)
 
 ### Bước 1: Cài đặt MCP trong Cursor
 
@@ -707,7 +638,7 @@ Call MCP tool: osint.status {}
 
 ---
 
-## Neo4j Data Model
+## 6. Neo4j Data Model
 
 ### Nodes
 
@@ -826,7 +757,7 @@ LIMIT 50
 
 ---
 
-## Bảo mật
+## 7. Bảo mật
 
 ### Các biện pháp đã áp dụng
 
@@ -853,7 +784,7 @@ sudo docker compose exec neo4j neo4j-admin database dump neo4j \
 
 ---
 
-## Quản lý và Bảo trì
+## 8. Quản lý và Bảo trì
 
 ### Tạm dừng để sửa config
 
@@ -928,7 +859,7 @@ cp secrets/credentials.txt ~/backup-credentials.txt
 
 ---
 
-## Gỡ cài đặt
+## 9. Gỡ cài đặt
 
 Xem hướng dẫn chi tiết: **[docs/UNINSTALL.md](docs/UNINSTALL.md)**
 
@@ -956,7 +887,7 @@ Script cung cấp 3 tùy chọn:
 
 ---
 
-## Troubleshooting
+## 10. Troubleshooting
 
 ### 1. Let's Encrypt không ra cert
 
@@ -1021,7 +952,7 @@ print(stats)
 
 ---
 
-## Tips vận hành
+## 11. Tips vận hành
 
 1. **Xem logs realtime:**
 ```bash
