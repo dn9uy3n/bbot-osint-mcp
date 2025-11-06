@@ -264,6 +264,18 @@ OFFLINE_HOST_RETENTION_DAYS=30
 ORPHAN_CLEANUP_ENABLED=true
 ```
 
+**Quick `.env` scaffold** (pulling values from `init_config.json` and `secrets/`):
+
+```bash
+cat <<'EOF' > .env
+LE_DOMAIN=osint.example.com
+LE_EMAIL=admin@example.com
+NEO4J_PASSWORD="$(tr -d '\n' < secrets/neo4j_password)"
+EOF
+```
+
+Open the file afterward to append additional variables (`PUBLIC_BASE_URL`, `RATE_LIMIT_PER_MINUTE`, etc.) suited to your setup.
+
 Docker secrets provide `API_TOKEN` and `NEO4J_PASSWORD` automatically. Add Telegram values if you want alerts.
 
 #### 2.3.2 Prepare `init_config.json` for central

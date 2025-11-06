@@ -268,6 +268,18 @@ OFFLINE_HOST_RETENTION_DAYS=30
 ORPHAN_CLEANUP_ENABLED=true
 ```
 
+- **Ví dụ tạo nhanh `.env`** (sử dụng giá trị từ `init_config.json` và thư mục `secrets/`):
+
+```bash
+cat <<'EOF' > .env
+LE_DOMAIN=osint.example.com
+LE_EMAIL=admin@example.com
+NEO4J_PASSWORD="$(tr -d '\n' < secrets/neo4j_password)"
+EOF
+```
+
+Sau đó mở file để bổ sung thêm các biến khác nếu cần (`PUBLIC_BASE_URL`, `RATE_LIMIT_PER_MINUTE`, ...).
+
 - `API_TOKEN` và `NEO4J_PASSWORD` sẽ được Docker secrets tự đọc từ thư mục `secrets/`.
 - Có thể thêm `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` nếu muốn nhận thông báo.
 
