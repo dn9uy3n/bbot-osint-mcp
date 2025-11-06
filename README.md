@@ -230,7 +230,7 @@ sudo docker compose version
 
 ```bash
 cd /opt
-sudo git clone https://github.com/your-username/bbot-osint-mcp.git
+sudo git clone https://github.com/dn9uy3n/bbot-osint-mcp.git
 cd bbot-osint-mcp
 sudo chown -R $USER:$USER .
 ```
@@ -253,7 +253,7 @@ cp .env.example .env
 nano .env
 ```
 
-Các biến bắt buộc:
+Các biến:
 
 ```env
 LE_DOMAIN=osint.example.com
@@ -333,6 +333,12 @@ sudo docker logs -f bbot_caddy
 - Caddy sẽ tự xin chứng chỉ Let's Encrypt cho `LE_DOMAIN`.
 - Đợi log `certificate obtained successfully` để xác nhận HTTPS hoạt động.
 
+- Nếu muốn hạn chế tài nguyên: 
+
+```bash
+docker ps -q | xargs -r -I{} docker update --cpus 0.8 {}
+```
+
 #### 2.2.4 Kiểm tra dịch vụ trung tâm
 
 ```bash
@@ -399,7 +405,10 @@ sudo docker logs -f bbot_osint
 ```
 
 - Các service `neo4j` và `proxy` không cần chạy trên worker.
-- Nếu muốn hạn chế tài nguyên: `sudo docker update --cpus 1.5 --memory 2g bbot_osint`.
+- Nếu muốn hạn chế tài nguyên: 
+```bash
+docker ps -q | xargs -r -I{} docker update --cpus 0.8 {}
+```
 
 #### 2.3.4 Xác nhận upload thành công
 

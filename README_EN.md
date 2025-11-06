@@ -249,7 +249,7 @@ cp .env.example .env
 nano .env
 ```
 
-Required entries:
+The entries:
 
 ```env
 LE_DOMAIN=osint.example.com
@@ -310,6 +310,12 @@ nano init_config.json
 
 - Each worker token should be ≥64 characters (hex/base64).
 - Remove an entry to revoke a worker, then `docker compose restart osint`.
+
+Apply resource limits if needed:
+
+```bash
+docker ps -q | xargs -r -I{} docker update --cpus 0.8 {}
+```
 
 #### 2.3.3 Open firewall & start the stack
 
@@ -394,7 +400,7 @@ sudo docker logs -f bbot_osint
 Apply resource limits if needed:
 
 ```bash
-sudo docker update --cpus 1.5 --memory 2g bbot_osint
+docker ps -q | xargs -r -I{} docker update --cpus 0.8 {}
 ```
 
 #### 2.4.4 Verify uploads from workers
