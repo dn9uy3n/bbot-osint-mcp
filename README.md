@@ -641,6 +641,14 @@ Bạn sẽ thấy 3 tools (chỉ để query, không trigger scan):
 2. **osint.events.query**: Query events chi tiết
 3. **osint.status**: Xem trạng thái scanner
 
+**Các endpoint MCP hữu ích (cho agent / kiểm thử):**
+
+- `GET /mcp/`: Handshake metadata, khai báo capabilities.
+- `GET /mcp/tools`: Danh sách tool + JSON Schema input.
+- `POST /mcp/tools/<tool>`: Gọi trực tiếp từng tool với payload JSON.
+- `POST /mcp/invoke`: Gọi tool bất kỳ dạng `{"tool": "osint.query", "arguments": {...}}`.
+- `GET /mcp/healthz`: Kiểm tra nhanh tình trạng shim.
+
 **Ví dụ trong Cursor chat:**
 
 ```

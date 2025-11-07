@@ -721,11 +721,19 @@ In Cursor:
 
 ### Step 3: Use Tools
 
-You'll see 2 tools:
+You'll see 3 tools:
 
 1. **osint.query**: Query hosts from Neo4j
 2. **osint.events.query**: Query detailed events
 3. **osint.status**: Scanner status/config
+
+**Helpful MCP endpoints (agents / manual testing):**
+
+- `GET /mcp/`: handshake metadata with capability list
+- `GET /mcp/tools`: tool catalog with JSON Schemas
+- `POST /mcp/tools/<tool>`: invoke a specific tool with JSON payload
+- `POST /mcp/invoke`: invoke any tool via `{ "tool": "osint.query", "arguments": { ... } }`
+- `GET /mcp/healthz`: health probe for the shim
 
 **Example in Cursor chat:**
 
